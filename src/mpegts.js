@@ -19,7 +19,7 @@
 import Features from "./core/features.js";
 import { BaseLoader, LoaderStatus, LoaderErrors } from "./io/loader.js";
 import MSEPlayer from "./player/mse-player";
-import NativePlayer from "./player/native-player.js";
+// import NativePlayer from "./player/native-player.js";
 import PlayerEvents from "./player/player-events";
 import { ErrorTypes, ErrorDetails } from "./player/player-errors.js";
 import LoggingControl from "./utils/logging-control.js";
@@ -32,13 +32,13 @@ function createPlayer(mediaDataSource, optionalConfig) {
   let mds = mediaDataSource;
   if (mds == null || typeof mds !== "object") {
     throw new InvalidArgumentException(
-      "MediaDataSource must be an javascript object!",
+      "MediaDataSource must be an javascript object!"
     );
   }
 
   if (!mds.hasOwnProperty("type")) {
     throw new InvalidArgumentException(
-      "MediaDataSource must has type field to indicate video file type!",
+      "MediaDataSource must has type field to indicate video file type!"
     );
   }
 
@@ -46,10 +46,11 @@ function createPlayer(mediaDataSource, optionalConfig) {
     case "mse":
     case "mpegts":
     case "m2ts":
-    case "flv":
+      // case "flv":
       return new MSEPlayer(mds, optionalConfig);
     default:
-      return new NativePlayer(mds, optionalConfig);
+      // return new NativePlayer(mds, optionalConfig);
+      throw new Error("NativePlayer is explicitly disabled");
   }
 }
 
@@ -78,7 +79,7 @@ mpegts.ErrorTypes = ErrorTypes;
 mpegts.ErrorDetails = ErrorDetails;
 
 mpegts.MSEPlayer = MSEPlayer;
-mpegts.NativePlayer = NativePlayer;
+// mpegts.NativePlayer = NativePlayer;
 mpegts.LoggingControl = LoggingControl;
 
 Object.defineProperty(mpegts, "version", {

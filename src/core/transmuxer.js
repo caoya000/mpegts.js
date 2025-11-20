@@ -17,10 +17,10 @@
  */
 
 import EventEmitter from "events";
-import TransmuxingWorker from "./transmuxing-worker.js?worker";
+import TransmuxingWorker from "./transmuxing-worker.js?worker&inline";
 import Log from "../utils/logger.js";
 import LoggingControl from "../utils/logging-control.js";
-import TransmuxingController from "./transmuxing-controller.js";
+// import TransmuxingController from "./transmuxing-controller.js";
 import TransmuxingEvents from "./transmuxing-events";
 import MediaInfo from "./media-info.js";
 
@@ -55,10 +55,12 @@ class Transmuxer {
           "Error while initialize transmuxing worker, fallback to inline transmuxing"
         );
         this._worker = null;
-        this._controller = new TransmuxingController(mediaDataSource, config);
+        throw new Error("Transmuxer without worker is explicitly disabled");
+        // this._controller = new TransmuxingController(mediaDataSource, config);
       }
     } else {
-      this._controller = new TransmuxingController(mediaDataSource, config);
+      // this._controller = new TransmuxingController(mediaDataSource, config);
+      throw new Error("Transmuxer without worker is explicitly disabled");
     }
 
     if (this._controller) {

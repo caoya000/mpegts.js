@@ -20,7 +20,7 @@ import EventEmitter from "events";
 import Log from "../utils/logger.js";
 import Browser from "../utils/browser.js";
 import MediaInfo from "./media-info.js";
-import FLVDemuxer from "../demux/flv-demuxer.js";
+// import FLVDemuxer from "../demux/flv-demuxer.js";
 import TSDemuxer from "../demux/ts-demuxer";
 import MP4Remuxer from "../remux/mp4-remuxer.js";
 import DemuxErrors from "../demux/demux-errors.js";
@@ -134,7 +134,7 @@ class TransmuxingController {
     let ioctl = (this._ioctl = new IOController(
       dataSource,
       this._config,
-      segmentIndex,
+      segmentIndex
     ));
     ioctl.onError = this._onIOException.bind(this);
     ioctl.onSeeked = this._onIOSeeked.bind(this);
@@ -258,22 +258,22 @@ class TransmuxingController {
       let probeData = null;
 
       // Try probing input data as FLV first
-      probeData = FLVDemuxer.probe(data);
+      // probeData = FLVDemuxer.probe(data);
+      // if (probeData.match) {
+      //   // Hit as FLV
+      //   this._setupFLVDemuxerRemuxer(probeData);
+      //   consumed = this._demuxer.parseChunks(data, byteStart);
+      // }
+
+      // if (!probeData.match && !probeData.needMoreData) {
+      // Non-FLV, try MPEG-TS probe
+      probeData = TSDemuxer.probe(data);
       if (probeData.match) {
-        // Hit as FLV
-        this._setupFLVDemuxerRemuxer(probeData);
+        // Hit as MPEG-TS
+        this._setupTSDemuxerRemuxer(probeData);
         consumed = this._demuxer.parseChunks(data, byteStart);
       }
-
-      if (!probeData.match && !probeData.needMoreData) {
-        // Non-FLV, try MPEG-TS probe
-        probeData = TSDemuxer.probe(data);
-        if (probeData.match) {
-          // Hit as MPEG-TS
-          this._setupTSDemuxerRemuxer(probeData);
-          consumed = this._demuxer.parseChunks(data, byteStart);
-        }
-      }
+      // }
 
       if (!probeData.match && !probeData.needMoreData) {
         // Both probing as FLV / MPEG-TS failed, report error
@@ -285,7 +285,7 @@ class TransmuxingController {
         this._emitter.emit(
           TransmuxingEvents.DEMUX_ERROR,
           DemuxErrors.FORMAT_UNSUPPORTED,
-          "Non MPEG-TS/FLV, Unsupported media type!",
+          "Non MPEG-TS/FLV, Unsupported media type!"
         );
         // Leave consumed as 0
       }
@@ -294,38 +294,38 @@ class TransmuxingController {
     return consumed;
   }
 
-  _setupFLVDemuxerRemuxer(probeData) {
-    this._demuxer = new FLVDemuxer(probeData, this._config);
+  // _setupFLVDemuxerRemuxer(probeData) {
+  //   this._demuxer = new FLVDemuxer(probeData, this._config);
 
-    if (!this._remuxer) {
-      this._remuxer = new MP4Remuxer(this._config);
-    }
+  //   if (!this._remuxer) {
+  //     this._remuxer = new MP4Remuxer(this._config);
+  //   }
 
-    let mds = this._mediaDataSource;
-    if (mds.duration != undefined && !isNaN(mds.duration)) {
-      this._demuxer.overridedDuration = mds.duration;
-    }
-    if (typeof mds.hasAudio === "boolean") {
-      this._demuxer.overridedHasAudio = mds.hasAudio;
-    }
-    if (typeof mds.hasVideo === "boolean") {
-      this._demuxer.overridedHasVideo = mds.hasVideo;
-    }
+  //   let mds = this._mediaDataSource;
+  //   if (mds.duration != undefined && !isNaN(mds.duration)) {
+  //     this._demuxer.overridedDuration = mds.duration;
+  //   }
+  //   if (typeof mds.hasAudio === "boolean") {
+  //     this._demuxer.overridedHasAudio = mds.hasAudio;
+  //   }
+  //   if (typeof mds.hasVideo === "boolean") {
+  //     this._demuxer.overridedHasVideo = mds.hasVideo;
+  //   }
 
-    this._demuxer.timestampBase =
-      mds.segments[this._currentSegmentIndex].timestampBase;
+  //   this._demuxer.timestampBase =
+  //     mds.segments[this._currentSegmentIndex].timestampBase;
 
-    this._demuxer.onError = this._onDemuxException.bind(this);
-    this._demuxer.onMediaInfo = this._onMediaInfo.bind(this);
-    this._demuxer.onMetaDataArrived = this._onMetaDataArrived.bind(this);
-    this._demuxer.onScriptDataArrived = this._onScriptDataArrived.bind(this);
+  //   this._demuxer.onError = this._onDemuxException.bind(this);
+  //   this._demuxer.onMediaInfo = this._onMediaInfo.bind(this);
+  //   this._demuxer.onMetaDataArrived = this._onMetaDataArrived.bind(this);
+  //   this._demuxer.onScriptDataArrived = this._onScriptDataArrived.bind(this);
 
-    this._remuxer.bindDataSource(this._demuxer.bindDataSource(this._ioctl));
+  //   this._remuxer.bindDataSource(this._demuxer.bindDataSource(this._ioctl));
 
-    this._remuxer.onInitSegment = this._onRemuxerInitSegmentArrival.bind(this);
-    this._remuxer.onMediaSegment =
-      this._onRemuxerMediaSegmentArrival.bind(this);
-  }
+  //   this._remuxer.onInitSegment = this._onRemuxerInitSegmentArrival.bind(this);
+  //   this._remuxer.onMediaSegment =
+  //     this._onRemuxerMediaSegmentArrival.bind(this);
+  // }
 
   _setupTSDemuxerRemuxer(probeData) {
     let demuxer = (this._demuxer = new TSDemuxer(probeData, this._config));
@@ -407,7 +407,7 @@ class TransmuxingController {
 
     this._emitter.emit(
       TransmuxingEvents.TIMED_ID3_METADATA_ARRIVED,
-      timed_id3_metadata,
+      timed_id3_metadata
     );
   }
 
@@ -444,14 +444,14 @@ class TransmuxingController {
 
     this._emitter.emit(
       TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED,
-      synchronous_klv_metadata,
+      synchronous_klv_metadata
     );
   }
 
   _onAsynchronousKLVMetadata(asynchronous_klv_metadata) {
     this._emitter.emit(
       TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED,
-      asynchronous_klv_metadata,
+      asynchronous_klv_metadata
     );
   }
 
@@ -475,7 +475,7 @@ class TransmuxingController {
 
     this._emitter.emit(
       TransmuxingEvents.SMPTE2038_METADATA_ARRIVED,
-      smpte2038_metadata,
+      smpte2038_metadata
     );
   }
 
@@ -499,7 +499,7 @@ class TransmuxingController {
   _onPESPrivateDataDescriptor(descriptor) {
     this._emitter.emit(
       TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR,
-      descriptor,
+      descriptor
     );
   }
 
@@ -523,7 +523,7 @@ class TransmuxingController {
 
     this._emitter.emit(
       TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED,
-      private_data,
+      private_data
     );
   }
 
@@ -562,7 +562,7 @@ class TransmuxingController {
   _onIOException(type, info) {
     Log.e(
       this.TAG,
-      `IOException: type = ${type}, code = ${info.code}, msg = ${info.msg}`,
+      `IOException: type = ${type}, code = ${info.code}, msg = ${info.msg}`
     );
     this._emitter.emit(TransmuxingEvents.IO_ERROR, type, info);
     this._disableStatisticsReporter();
@@ -608,7 +608,7 @@ class TransmuxingController {
     if (this._statisticsReporter == null) {
       this._statisticsReporter = self.setInterval(
         this._reportStatisticsInfo.bind(this),
-        this._config.statisticsInfoReportInterval,
+        this._config.statisticsInfoReportInterval
       );
     }
   }

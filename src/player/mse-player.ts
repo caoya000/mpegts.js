@@ -20,7 +20,7 @@ import Log from "../utils/logger";
 import MediaInfo from "../core/media-info";
 import PlayerEngine from "./player-engine";
 import PlayerEngineMainThread from "./player-engine-main-thread";
-import PlayerEngineDedicatedThread from "./player-engine-dedicated-thread";
+// import PlayerEngineDedicatedThread from "./player-engine-dedicated-thread";
 import { InvalidArgumentException } from "../utils/exception";
 
 class MSEPlayer {
@@ -40,28 +40,29 @@ class MSEPlayer {
       typeLowerCase !== "flv"
     ) {
       throw new InvalidArgumentException(
-        "MSEPlayer requires an mpegts/m2ts/flv MediaDataSource input!",
+        "MSEPlayer requires an mpegts/m2ts/flv MediaDataSource input!"
       );
     }
 
     if (
       config &&
-      config.enableWorkerForMSE &&
-      PlayerEngineDedicatedThread.isSupported()
+      config.enableWorkerForMSE
+      // && PlayerEngineDedicatedThread.isSupported()
     ) {
       try {
-        this._player_engine = new PlayerEngineDedicatedThread(
-          mediaDataSource,
-          config,
-        );
+        throw new Error("PlayerEngineDedicatedThread is explicitly disabled");
+        // this._player_engine = new PlayerEngineDedicatedThread(
+        //   mediaDataSource,
+        //   config,
+        // );
       } catch (error) {
         Log.e(
           this.TAG,
-          "Error while initializing PlayerEngineDedicatedThread, fallback to PlayerEngineMainThread",
+          "Error while initializing PlayerEngineDedicatedThread, fallback to PlayerEngineMainThread"
         );
         this._player_engine = new PlayerEngineMainThread(
           mediaDataSource,
-          config,
+          config
         );
       }
     } else {

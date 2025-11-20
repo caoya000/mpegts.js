@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import path from "path";
 import packageJson from "./package.json";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
+// import { analyzer } from "vite-bundle-analyzer";
 
 export default defineConfig(({ mode }) => {
   const isDev = mode === "development";
@@ -13,6 +14,7 @@ export default defineConfig(({ mode }) => {
       nodePolyfills({
         include: ["events"],
       }),
+      // analyzer(),
     ],
 
     // Development server config

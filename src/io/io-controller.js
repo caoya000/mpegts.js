@@ -20,10 +20,10 @@ import Log from "../utils/logger.js";
 import SpeedSampler from "./speed-sampler.js";
 import { LoaderStatus, LoaderErrors } from "./loader.js";
 import FetchStreamLoader from "./fetch-stream-loader.js";
-import MozChunkedLoader from "./xhr-moz-chunked-loader.js";
-import MSStreamLoader from "./xhr-msstream-loader.js";
-import RangeLoader from "./xhr-range-loader.js";
-import WebSocketLoader from "./websocket-loader.js";
+// import MozChunkedLoader from "./xhr-moz-chunked-loader.js";
+// import MSStreamLoader from "./xhr-msstream-loader.js";
+// import RangeLoader from "./xhr-range-loader.js";
+// import WebSocketLoader from "./websocket-loader.js";
 import RangeSeekHandler from "./range-seek-handler.js";
 import ParamSeekHandler from "./param-seek-handler.js";
 import {
@@ -216,10 +216,10 @@ class IOController {
 
   // in KB/s
   get currentSpeed() {
-    if (this._loaderClass === RangeLoader) {
-      // SpeedSampler is inaccuracy if loader is RangeLoader
-      return this._loader.currentSpeed;
-    }
+    // if (this._loaderClass === RangeLoader) {
+    //   // SpeedSampler is inaccuracy if loader is RangeLoader
+    //   return this._loader.currentSpeed;
+    // }
     return this._speedSampler.lastSecondKBps;
   }
 
@@ -240,13 +240,13 @@ class IOController {
     } else if (config.seekType === "custom") {
       if (typeof config.customSeekHandler !== "function") {
         throw new InvalidArgumentException(
-          "Custom seekType specified in config but invalid customSeekHandler!",
+          "Custom seekType specified in config but invalid customSeekHandler!"
         );
       }
       this._seekHandler = new config.customSeekHandler();
     } else {
       throw new InvalidArgumentException(
-        `Invalid seekType in config: ${config.seekType}`,
+        `Invalid seekType in config: ${config.seekType}`
       );
     }
   }
@@ -255,16 +255,17 @@ class IOController {
     if (this._config.customLoader != null) {
       this._loaderClass = this._config.customLoader;
     } else if (this._isWebSocketURL) {
-      this._loaderClass = WebSocketLoader;
+      // this._loaderClass = WebSocketLoader;
+      throw new Error("WebSocketLoader is explicitly disabled");
     } else if (FetchStreamLoader.isSupported()) {
       this._loaderClass = FetchStreamLoader;
-    } else if (MozChunkedLoader.isSupported()) {
-      this._loaderClass = MozChunkedLoader;
-    } else if (RangeLoader.isSupported()) {
-      this._loaderClass = RangeLoader;
+      // } else if (MozChunkedLoader.isSupported()) {
+      //   this._loaderClass = MozChunkedLoader;
+      // } else if (RangeLoader.isSupported()) {
+      //   this._loaderClass = RangeLoader;
     } else {
       throw new RuntimeException(
-        "Your browser doesn't support xhr with arraybuffer responseType!",
+        "Your browser doesn't support xhr with arraybuffer responseType!"
       );
     }
   }
@@ -473,7 +474,7 @@ class IOController {
   _onLoaderChunkArrival(chunk, byteStart, receivedLength) {
     if (!this._onDataArrival) {
       throw new IllegalStateException(
-        "IOController: No existing consumer (onDataArrival) callback!",
+        "IOController: No existing consumer (onDataArrival) callback!"
       );
     }
     if (this._paused) {
@@ -514,7 +515,7 @@ class IOController {
           let stashArray = new Uint8Array(
             this._stashBuffer,
             0,
-            this._bufferSize,
+            this._bufferSize
           );
           stashArray.set(new Uint8Array(chunk, consumed), 0);
           this._stashUsed += remain;
@@ -530,7 +531,7 @@ class IOController {
         this._stashUsed += chunk.byteLength;
         let consumed = this._dispatchChunks(
           this._stashBuffer.slice(0, this._stashUsed),
-          this._stashByteStart,
+          this._stashByteStart
         );
         if (consumed < this._stashUsed && consumed > 0) {
           // unconsumed data remain
@@ -589,7 +590,7 @@ class IOController {
               stashArray = new Uint8Array(
                 this._stashBuffer,
                 0,
-                this._bufferSize,
+                this._bufferSize
               );
             }
             stashArray.set(new Uint8Array(chunk, consumed), 0);
@@ -611,14 +612,14 @@ class IOController {
         if (dropUnconsumed) {
           Log.w(
             this.TAG,
-            `${remain} bytes unconsumed data remain when flush buffer, dropped`,
+            `${remain} bytes unconsumed data remain when flush buffer, dropped`
           );
         } else {
           if (consumed > 0) {
             let stashArray = new Uint8Array(
               this._stashBuffer,
               0,
-              this._bufferSize,
+              this._bufferSize
             );
             let remainArray = new Uint8Array(buffer, consumed);
             stashArray.set(remainArray, 0);

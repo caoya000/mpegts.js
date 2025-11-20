@@ -17,7 +17,7 @@
  */
 
 import EventEmitter from "events";
-import PlayerEngineWorker from "./player-engine-worker?worker";
+import PlayerEngineWorker from "./player-engine-worker?worker&inline";
 import type PlayerEngine from "./player-engine";
 import Log from "../utils/logger";
 import LoggingControl from "../utils/logging-control.js";

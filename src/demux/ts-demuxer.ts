@@ -71,8 +71,8 @@ import {
   EAC3Parser,
 } from "./ac3";
 import { KLVData, klv_parse } from "./klv";
-import AV1OBUInMpegTsParser from "./av1";
-import AV1OBUParser from "./av1-parser";
+// import AV1OBUInMpegTsParser from "./av1";
+// import AV1OBUParser from "./av1-parser";
 import { PGSData } from "./pgs-data";
 
 type AdaptationFieldInfo = {
@@ -752,13 +752,13 @@ class TSDemuxer extends BaseDemuxer {
           break;
         case StreamType.kPESPrivateData:
           if (this.pmt_.common_pids.av1 === pes_data.pid) {
-            this.parseAV1Payload(
-              payload,
-              pts,
-              dts,
-              pes_data.file_position,
-              pes_data.random_access_indicator
-            );
+            // this.parseAV1Payload(
+            //   payload,
+            //   pts,
+            //   dts,
+            //   pes_data.file_position,
+            //   pes_data.random_access_indicator
+            // );
           } else if (this.pmt_.common_pids.opus === pes_data.pid) {
             this.parseOpusPayload(payload, pts);
           } else if (this.pmt_.common_pids.ac3 === pes_data.pid) {
@@ -1220,88 +1220,88 @@ class TSDemuxer extends BaseDemuxer {
     }
   }
 
-  private parseAV1Payload(
-    data: Uint8Array,
-    pts: number,
-    dts: number,
-    file_position: number,
-    random_access_indicator: number
-  ) {
-    let av1_in_ts_parser = new AV1OBUInMpegTsParser(data);
-    let payload: Uint8Array | null = null;
-    let units: { data: Uint8Array }[] = [];
-    let length = 0;
-    let keyframe = false;
+  // private parseAV1Payload(
+  //   data: Uint8Array,
+  //   pts: number,
+  //   dts: number,
+  //   file_position: number,
+  //   random_access_indicator: number
+  // ) {
+  //   let av1_in_ts_parser = new AV1OBUInMpegTsParser(data);
+  //   let payload: Uint8Array | null = null;
+  //   let units: { data: Uint8Array }[] = [];
+  //   let length = 0;
+  //   let keyframe = false;
 
-    let details = null;
-    while ((payload = av1_in_ts_parser.readNextOBUPayload()) != null) {
-      details = AV1OBUParser.parseOBUs(payload, this.video_metadata_.details);
+  //   let details = null;
+  //   while ((payload = av1_in_ts_parser.readNextOBUPayload()) != null) {
+  //     details = AV1OBUParser.parseOBUs(payload, this.video_metadata_.details);
 
-      if (details && details.keyframe === true) {
-        if (!this.video_init_segment_dispatched_) {
-          const av1c = new Uint8Array(
-            new ArrayBuffer(
-              this.video_metadata_.av1c.byteLength +
-                details.sequence_header_data.byteLength
-            )
-          );
-          av1c.set(this.video_metadata_.av1c, 0);
-          av1c.set(
-            details.sequence_header_data,
-            this.video_metadata_.av1c.byteLength
-          );
-          details.av1c = av1c;
+  //     if (details && details.keyframe === true) {
+  //       if (!this.video_init_segment_dispatched_) {
+  //         const av1c = new Uint8Array(
+  //           new ArrayBuffer(
+  //             this.video_metadata_.av1c.byteLength +
+  //               details.sequence_header_data.byteLength
+  //           )
+  //         );
+  //         av1c.set(this.video_metadata_.av1c, 0);
+  //         av1c.set(
+  //           details.sequence_header_data,
+  //           this.video_metadata_.av1c.byteLength
+  //         );
+  //         details.av1c = av1c;
 
-          this.video_metadata_.details = details;
-          this.dispatchVideoInitSegment();
-        } else if (this.detectVideoMetadataChange(null, details) === true) {
-          this.video_metadata_changed_ = true;
-          // flush stashed frames before changing codec metadata
-          this.dispatchVideoMediaSegment();
+  //         this.video_metadata_.details = details;
+  //         this.dispatchVideoInitSegment();
+  //       } else if (this.detectVideoMetadataChange(null, details) === true) {
+  //         this.video_metadata_changed_ = true;
+  //         // flush stashed frames before changing codec metadata
+  //         this.dispatchVideoMediaSegment();
 
-          const av1c = new Uint8Array(
-            new ArrayBuffer(
-              this.video_metadata_.av1c.byteLength +
-                details.sequence_header_data.byteLength
-            )
-          );
-          av1c.set(this.video_metadata_.av1c, 0);
-          av1c.set(
-            details.sequence_header_data,
-            this.video_metadata_.av1c.byteLength
-          );
-          details.av1c = av1c;
-          // notify new codec metadata (maybe changed)
-          this.dispatchVideoInitSegment();
-        }
-      }
-      this.video_metadata_.details = details;
+  //         const av1c = new Uint8Array(
+  //           new ArrayBuffer(
+  //             this.video_metadata_.av1c.byteLength +
+  //               details.sequence_header_data.byteLength
+  //           )
+  //         );
+  //         av1c.set(this.video_metadata_.av1c, 0);
+  //         av1c.set(
+  //           details.sequence_header_data,
+  //           this.video_metadata_.av1c.byteLength
+  //         );
+  //         details.av1c = av1c;
+  //         // notify new codec metadata (maybe changed)
+  //         this.dispatchVideoInitSegment();
+  //       }
+  //     }
+  //     this.video_metadata_.details = details;
 
-      //if (this.video_init_segment_dispatched_) {
-      keyframe ||= details.keyframe;
-      units.push({ data: payload });
-      length += payload.byteLength;
-      //}
-    }
+  //     //if (this.video_init_segment_dispatched_) {
+  //     keyframe ||= details.keyframe;
+  //     units.push({ data: payload });
+  //     length += payload.byteLength;
+  //     //}
+  //   }
 
-    let pts_ms = Math.floor(pts / this.timescale_);
-    let dts_ms = Math.floor(dts / this.timescale_);
+  //   let pts_ms = Math.floor(pts / this.timescale_);
+  //   let dts_ms = Math.floor(dts / this.timescale_);
 
-    if (units.length) {
-      let track = this.video_track_;
-      let av1_sample = {
-        units,
-        length,
-        isKeyframe: keyframe,
-        dts: dts_ms,
-        pts: pts_ms,
-        cts: pts_ms - dts_ms,
-        file_position,
-      };
-      track.samples.push(av1_sample);
-      track.length += length;
-    }
-  }
+  //   if (units.length) {
+  //     let track = this.video_track_;
+  //     let av1_sample = {
+  //       units,
+  //       length,
+  //       isKeyframe: keyframe,
+  //       dts: dts_ms,
+  //       pts: pts_ms,
+  //       cts: pts_ms - dts_ms,
+  //       file_position,
+  //     };
+  //     track.samples.push(av1_sample);
+  //     track.length += length;
+  //   }
+  // }
 
   private parseH264Payload(
     data: Uint8Array,
