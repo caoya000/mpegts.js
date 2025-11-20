@@ -1,5 +1,5 @@
 {
-  "name": "mpegts.js",
+  "name": "@rtp2httpd/mpegts.js",
   "version": "2.0.0",
   "description": "HTML5 MPEG2-TS Stream Player",
   "main": "./dist/mpegts.esm.js",
