@@ -110,7 +110,7 @@ class MSEController {
   initialize(mediaElementProxy) {
     if (this._mediaSource) {
       throw new IllegalStateException(
-        "MediaSource has been attached to an HTMLMediaElement!",
+        "MediaSource has been attached to an HTMLMediaElement!"
       );
     }
 
@@ -191,7 +191,7 @@ class MSEController {
   getObject() {
     if (!this._mediaSource) {
       throw new IllegalStateException(
-        "MediaSource has not been initialized yet!",
+        "MediaSource has not been initialized yet!"
       );
     }
     return this._mediaSource;
@@ -200,7 +200,7 @@ class MSEController {
   getHandle() {
     if (!this._mediaSource) {
       throw new IllegalStateException(
-        "MediaSource has not been initialized yet!",
+        "MediaSource has not been initialized yet!"
       );
     }
     return this._mediaSource.handle;
@@ -209,7 +209,7 @@ class MSEController {
   getObjectURL() {
     if (!this._mediaSource) {
       throw new IllegalStateException(
-        "MediaSource has not been initialized yet!",
+        "MediaSource has not been initialized yet!"
       );
     }
 
@@ -265,16 +265,18 @@ class MSEController {
           sb.addEventListener("updateend", this.e.onSourceBufferUpdateEnd);
         } catch (error) {
           Log.e(this.TAG, error.message);
-          this._emitter.emit(MSEEvents.ERROR, {
-            code: error.code,
-            msg: error.message,
-          });
-          return;
+          if (error.name !== "NotSupportedError") {
+            this._emitter.emit(MSEEvents.ERROR, {
+              code: error.code,
+              msg: error.message,
+            });
+            return;
+          }
         }
       } else {
         Log.v(
           this.TAG,
-          `Notice: ${is.type} mimeType changed, origin: ${this._mimeTypes[is.type]}, target: ${mimeType}`,
+          `Notice: ${is.type} mimeType changed, origin: ${this._mimeTypes[is.type]}, target: ${mimeType}`
         );
       }
       this._mimeTypes[is.type] = mimeType;
@@ -485,7 +487,7 @@ class MSEController {
     if (target > 0 && (isNaN(current) || target > current)) {
       Log.v(
         this.TAG,
-        `Update MediaSource duration from ${current} to ${target}`,
+        `Update MediaSource duration from ${current} to ${target}`
       );
       this._mediaSource.duration = target;
     }
@@ -537,7 +539,7 @@ class MSEController {
             // If time delta > 100ms
             Log.v(
               this.TAG,
-              `Update MPEG audio timestampOffset from ${currentOffset} to ${targetOffset}`,
+              `Update MPEG audio timestampOffset from ${currentOffset} to ${targetOffset}`
             );
             this._sourceBuffers[type].timestampOffset = targetOffset;
           }
@@ -626,24 +628,24 @@ class MSEController {
       this._mediaSource.removeEventListener("sourceopen", this.e.onSourceOpen);
       this._mediaSource.removeEventListener(
         "sourceended",
-        this.e.onSourceEnded,
+        this.e.onSourceEnded
       );
       this._mediaSource.removeEventListener(
         "sourceclose",
-        this.e.onSourceClose,
+        this.e.onSourceClose
       );
       if (this._useManagedMediaSource) {
         this._mediaSource.removeEventListener(
           "startstreaming",
-          this.e.onStartStreaming,
+          this.e.onStartStreaming
         );
         this._mediaSource.removeEventListener(
           "endstreaming",
-          this.e.onEndStreaming,
+          this.e.onEndStreaming
         );
         this._mediaSource.removeEventListener(
           "qualitychange",
-          this.e.onQualityChange,
+          this.e.onQualityChange
         );
       }
     }

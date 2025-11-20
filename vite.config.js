@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "../dist",
       emptyOutDir: true,
-      sourcemap: true,
+      sourcemap: isDev,
       minify: !isDev,
       lib: {
         entry: path.resolve(__dirname, "src/mpegts.js"),
