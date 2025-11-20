@@ -52,8 +52,11 @@
         <textarea name="logcatbox" class="logcatBox" rows="10" readonly></textarea>
     </div>
 
-    <script src="../dist/mpegts.js"></script>
-    
+    <script type="module">
+        import mpegts from '../src/index.js';
+        window.mpegts = mpegts;
+    </script>
+
     <script>
         var checkBoxFields = ['isLive', 'withCredentials', 'liveBufferLatencyChasing'];
         var streamURL, mediaSourceURL;
