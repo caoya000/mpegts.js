@@ -1102,7 +1102,7 @@ class TSDemuxer extends BaseDemuxer {
                   offset + 2 + length
                 );
               }
-            } else if (tag === 0x82) {
+            } else if (tag === 0x82 || tag === 0x6a) {
               pmt.common_pids.ac3 = elementary_PID;
             } else if (tag === 0x7a) {
               pmt.common_pids.eac3 = elementary_PID;
