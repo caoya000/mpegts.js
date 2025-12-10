@@ -1037,16 +1037,32 @@ class TSDemuxer extends BaseDemuxer {
           for (let offset = i + 5; offset < i + 5 + ES_info_length; ) {
             let tag = data[offset + 0];
             let length = data[offset + 1];
+
+            // 调试日志（建议保留用来排查）
+            if (elementary_PID === 402) { 
+              let content = data.subarray(offset + 2, offset + 2 + length);
+              let asString = "";
+              for(let k=0; k<content.length && k<4; k++) asString += String.fromCharCode(content[k]);
+              console.log(`[PMT] PID ${elementary_PID} Tag: 0x${tag.toString(16)} Len: ${length} Str: "${asString}"`);
+            }
+
             if (tag === 0x05) {
               // Registration Descriptor
+              // let registration = String.fromCharCode(
+              //   ...Array.from(data.subarray(offset + 2, offset + 2 + length))
+              // );
+              // 【修正】强制只读取 4 个字节，避免 length > 4 时导致字符串不匹配
+              let safeLen = length >= 4 ? 4 : length;
               let registration = String.fromCharCode(
-                ...Array.from(data.subarray(offset + 2, offset + 2 + length))
+                ...Array.from(data.subarray(offset + 2, offset + 2 + safeLen))
               );
 
               if (registration === "VANC") {
                 pmt.smpte2038_pids[elementary_PID] = true;
               } else if (registration === "AC-3" && !already_has_audio) {
                 pmt.common_pids.ac3 = elementary_PID; // DVB AC-3 (FIXME: NEED VERIFY)
+              } else if (registration === "BSSD" && !already_has_audio) {
+                pmt.common_pids.ac3 = elementary_PID; // 【新增】支持 BSSD
               } else if (registration === "EC-3" && !already_has_audio) {
                 pmt.common_pids.eac3 = elementary_PID; // DVB EAC-3 (FIXME: NEED VERIFY)
               } else if (registration === "AV01") {
@@ -1102,7 +1118,7 @@ class TSDemuxer extends BaseDemuxer {
                   offset + 2 + length
                 );
               }
-            } else if (tag === 0x82 || tag === 0x6a) {
+            } else if (tag === 0x82 || tag === 0x6a || tag === 0x81) {
               pmt.common_pids.ac3 = elementary_PID;
             } else if (tag === 0x7a) {
               pmt.common_pids.eac3 = elementary_PID;
