@@ -1001,11 +1001,6 @@ class TSDemuxer extends BaseDemuxer {
       let elementary_PID = ((data[i + 1] & 0x1f) << 8) | data[i + 2];
       let ES_info_length = ((data[i + 3] & 0x0f) << 8) | data[i + 4];
 
-      // 【添加这一行】
-      if (stream_type === StreamType.kPESPrivateData) {
-        console.log(`[DEBUG] PID: ${elementary_PID}, Type: 0x06, InfoLen: ${ES_info_length}`);
-      }
-
       pmt.pid_stream_type[elementary_PID] = stream_type;
 
       let already_has_video = pmt.common_pids.h264 || pmt.common_pids.h265;
@@ -1129,10 +1124,15 @@ class TSDemuxer extends BaseDemuxer {
             stream_type,
             descriptors
           );
-        } else if (ES_info_length === 0 && !already_has_audio) {
-          // 【新增】兜底逻辑：如果没有描述符 (长度为0)，或者是 0x06 类型但没识别出来
-          Log.w(this.TAG, `PID ${elementary_PID} is PrivateData(0x06) without descriptors. Assuming AC-3.`);
-          pmt.common_pids.ac3 = elementary_PID;
+        }
+        // ============================================================
+        // 【新增】兜底逻辑：针对“裸奔”的 AC-3 音频
+        // 如果没有描述符 (Length 为 0)，且还没找到其他音频，强制识别为 AC-3
+        // ============================================================
+        if (ES_info_length === 0 && !already_has_audio) {
+           Log.w(this.TAG, `PID ${elementary_PID} is PrivateData(0x06) without descriptors. Fallback to AC-3.`);
+           pmt.common_pids.ac3 = elementary_PID;
+           delete pmt.pes_private_data_pids[elementary_PID]; // 只有删掉它，最后结果才正确
         }
       } else if (stream_type === StreamType.kMetadata) {
         if (ES_info_length > 0) {
