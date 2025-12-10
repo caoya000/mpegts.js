@@ -1001,6 +1001,11 @@ class TSDemuxer extends BaseDemuxer {
       let elementary_PID = ((data[i + 1] & 0x1f) << 8) | data[i + 2];
       let ES_info_length = ((data[i + 3] & 0x0f) << 8) | data[i + 4];
 
+      // 【添加这一行】
+      if (stream_type === StreamType.kPESPrivateData) {
+        console.log(`[DEBUG] PID: ${elementary_PID}, Type: 0x06, InfoLen: ${ES_info_length}`);
+      }
+
       pmt.pid_stream_type[elementary_PID] = stream_type;
 
       let already_has_video = pmt.common_pids.h264 || pmt.common_pids.h265;
@@ -1037,15 +1042,6 @@ class TSDemuxer extends BaseDemuxer {
           for (let offset = i + 5; offset < i + 5 + ES_info_length; ) {
             let tag = data[offset + 0];
             let length = data[offset + 1];
-
-            // 调试日志（建议保留用来排查）
-            if (elementary_PID === 402) { 
-              let content = data.subarray(offset + 2, offset + 2 + length);
-              let asString = "";
-              for(let k=0; k<content.length && k<4; k++) asString += String.fromCharCode(content[k]);
-              console.log(`[PMT] PID ${elementary_PID} Tag: 0x${tag.toString(16)} Len: ${length} Str: "${asString}"`);
-            }
-
             if (tag === 0x05) {
               // Registration Descriptor
               // let registration = String.fromCharCode(
@@ -1133,6 +1129,10 @@ class TSDemuxer extends BaseDemuxer {
             stream_type,
             descriptors
           );
+        } else if (ES_info_length === 0 && !already_has_audio) {
+          // 【新增】兜底逻辑：如果没有描述符 (长度为0)，或者是 0x06 类型但没识别出来
+          Log.w(this.TAG, `PID ${elementary_PID} is PrivateData(0x06) without descriptors. Assuming AC-3.`);
+          pmt.common_pids.ac3 = elementary_PID;
         }
       } else if (stream_type === StreamType.kMetadata) {
         if (ES_info_length > 0) {
