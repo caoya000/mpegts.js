@@ -17,19 +17,15 @@ import Log from "../utils/logger";
 
 export interface DataSource {
 	url: string;
-	filesize?: number;
 	cors?: boolean;
 	withCredentials?: boolean;
 	referrerPolicy?: ReferrerPolicy;
 }
 
 export const LoaderErrors = {
-	OK: "OK",
 	EXCEPTION: "Exception",
 	HTTP_STATUS_CODE_INVALID: "HttpStatusCodeInvalid",
-	CONNECTING_TIMEOUT: "ConnectingTimeout",
 	EARLY_EOF: "EarlyEof",
-	UNRECOVERABLE_EARLY_EOF: "UnrecoverableEarlyEof",
 } as const;
 
 export interface LoaderErrorInfo {
@@ -62,7 +58,6 @@ class FetchLoader {
 	onSeeked: (() => void) | null;
 	onError: ((type: string, info: LoaderErrorInfo) => void) | null;
 	onComplete: ((extraData: unknown) => void) | null;
-	onRecoveredEarlyEof: (() => void) | null;
 	onHLSDetected: (() => void) | null;
 
 	// --- config / data source ---
@@ -76,14 +71,8 @@ class FetchLoader {
 	private _stashBuffer: ArrayBuffer | null;
 	private _stashByteStart: number;
 
-	// --- range / length tracking ---
+	// --- range tracking ---
 	private _currentRange: LoaderRange | null;
-	private _refTotalLength: number | null;
-	private _totalLength: number | null;
-	private _fullRequestFlag: boolean;
-
-	// --- reconnect ---
-	private _isEarlyEofReconnecting: boolean;
 
 	// --- pause / resume ---
 	private _paused: boolean;
@@ -107,14 +96,7 @@ class FetchLoader {
 		this._stashBuffer = new ArrayBuffer(this._bufferSize);
 		this._stashByteStart = 0;
 
-		// range / length
 		this._currentRange = null;
-		this._refTotalLength = dataSource.filesize ? dataSource.filesize : null;
-		this._totalLength = this._refTotalLength;
-		this._fullRequestFlag = false;
-
-		// reconnect
-		this._isEarlyEofReconnecting = false;
 
 		// pause
 		this._paused = false;
@@ -132,7 +114,6 @@ class FetchLoader {
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onRecoveredEarlyEof = null;
 		this.onHLSDetected = null;
 	}
 
@@ -146,13 +127,11 @@ class FetchLoader {
 		this._stashUsed = this._bufferSize = this._stashByteStart = 0;
 		this._currentRange = null;
 		this._status = LoaderStatus.kIdle;
-		this._isEarlyEofReconnecting = false;
 
 		this.onDataArrival = null;
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onRecoveredEarlyEof = null;
 		this.onHLSDetected = null;
 
 		this._extraData = null;
@@ -180,22 +159,10 @@ class FetchLoader {
 		return this._dataSource?.url ?? "";
 	}
 
-	get loaderType(): string {
-		return "fetch-stream-loader";
-	}
+	// --- open / abort / pause / resume ----------------------------------------
 
-	// --- open / abort / pause / resume / seek --------------------------------
-
-	open(optionalFrom?: number): void {
+	open(): void {
 		this._currentRange = { from: 0, to: -1 };
-		if (optionalFrom) {
-			this._currentRange.from = optionalFrom;
-		}
-
-		if (!optionalFrom) {
-			this._fullRequestFlag = true;
-		}
-
 		this._startFetch(Object.assign({}, this._currentRange));
 	}
 
@@ -229,15 +196,8 @@ class FetchLoader {
 			this._paused = false;
 			const bytes = this._resumeFrom;
 			this._resumeFrom = 0;
-			this._internalSeek(bytes, true);
+			this._internalSeek(bytes);
 		}
-	}
-
-	seek(bytes: number): void {
-		this._paused = false;
-		this._stashUsed = 0;
-		this._stashByteStart = 0;
-		this._internalSeek(bytes, true);
 	}
 
 	// --- Range header construction (inlined RangeSeekHandler) ----------------
@@ -336,10 +296,6 @@ class FetchLoader {
 						const cl = parseInt(lengthHeader, 10);
 						if (cl !== 0) {
 							this._contentLength = cl;
-							if (cl && this._fullRequestFlag) {
-								this._totalLength = cl;
-								this._fullRequestFlag = false;
-							}
 						}
 					}
 
@@ -453,17 +409,13 @@ class FetchLoader {
 
 	// --- internal seek -------------------------------------------------------
 
-	/**
-	 * @param dropUnconsumed - When true, discard all unconsumed stash data (user seek).
-	 *                         When false, keep unconsumed data (reconnect after EarlyEof).
-	 */
-	private _internalSeek(bytes: number, dropUnconsumed: boolean): void {
+	private _internalSeek(bytes: number): void {
 		if (this._status === LoaderStatus.kConnecting || this._status === LoaderStatus.kBuffering) {
 			this._abortFetch();
 		}
 
-		// flush stash before seeking
-		this._flushStashBuffer(dropUnconsumed);
+		// flush stash before resuming
+		this._flushStashBuffer(true);
 
 		const requestRange: LoaderRange = { from: bytes, to: -1 };
 		this._currentRange = { from: requestRange.from, to: -1 };
@@ -540,13 +492,6 @@ class FetchLoader {
 		if (this._paused) {
 			return;
 		}
-		if (this._isEarlyEofReconnecting) {
-			this._isEarlyEofReconnecting = false;
-			if (this.onRecoveredEarlyEof) {
-				this.onRecoveredEarlyEof();
-			}
-		}
-
 		// dispatch directly, buffer only unconsumed bytes
 		if (this._stashUsed === 0) {
 			const consumed = this._dispatchChunks(chunk, byteStart);
@@ -594,34 +539,6 @@ class FetchLoader {
 		Log.e(this.TAG, `Loader error, code = ${data.code}, msg = ${data.msg}`);
 
 		this._flushStashBuffer(false);
-
-		if (this._isEarlyEofReconnecting) {
-			this._isEarlyEofReconnecting = false;
-			type = LoaderErrors.UNRECOVERABLE_EARLY_EOF;
-		}
-
-		switch (type) {
-			case LoaderErrors.EARLY_EOF: {
-				if (!this._config.isLive) {
-					if (this._totalLength) {
-						const nextFrom = (this._currentRange?.to ?? 0) + 1;
-						if (nextFrom < this._totalLength) {
-							Log.w(this.TAG, "Connection lost, trying reconnect...");
-							this._isEarlyEofReconnecting = true;
-							this._internalSeek(nextFrom, false);
-						}
-						return;
-					}
-				}
-				type = LoaderErrors.UNRECOVERABLE_EARLY_EOF;
-				break;
-			}
-			case LoaderErrors.UNRECOVERABLE_EARLY_EOF:
-			case LoaderErrors.CONNECTING_TIMEOUT:
-			case LoaderErrors.HTTP_STATUS_CODE_INVALID:
-			case LoaderErrors.EXCEPTION:
-				break;
-		}
 
 		if (this.onError) {
 			this.onError(type, data);

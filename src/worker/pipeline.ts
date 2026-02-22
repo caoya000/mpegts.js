@@ -6,7 +6,6 @@ import TSDemuxer from "../demux/ts-demuxer";
 import FetchLoader from "../io/fetch-loader";
 import MP4Remuxer from "../remux/mp4-remuxer";
 import type { PlayerConfig, PlayerSegment } from "../types";
-import Browser from "../utils/browser";
 import Log from "../utils/logger";
 
 export interface PipelineCallbacks {
@@ -29,11 +28,9 @@ export interface PipelineCallbacks {
 		},
 	) => void;
 	onLoadingComplete: () => void;
-	onRecoveredEarlyEof: () => void;
 	onMediaInfo: (mediaInfo: unknown) => void;
 	onIOError: (type: string, info: { code: number; msg: string }) => void;
 	onDemuxError: (type: string, info: string) => void;
-	onRecommendSeekpoint: (milliseconds: number) => void;
 	onHLSDetected: () => void;
 }
 
@@ -43,7 +40,6 @@ interface InternalSegment {
 	timestampBase: number;
 	cors: boolean;
 	withCredentials: boolean;
-	filesize?: number;
 	referrerPolicy?: ReferrerPolicy;
 }
 
@@ -60,9 +56,6 @@ class Pipeline {
 	private _demuxer: TSDemuxer | null;
 	private _remuxer: MP4Remuxer | null;
 	private _ioctl: FetchLoader | null;
-
-	private _pendingSeekTime: number | null;
-	private _pendingResolveSeekPoint: number | null;
 
 	constructor(segments: PlayerSegment[], config: PlayerConfig, callbacks: PipelineCallbacks) {
 		this._callbacks = callbacks;
@@ -83,9 +76,6 @@ class Pipeline {
 		this._demuxer = null;
 		this._remuxer = null;
 		this._ioctl = null;
-
-		this._pendingSeekTime = null;
-		this._pendingResolveSeekPoint = null;
 	}
 
 	private _buildSegments(playerSegments: PlayerSegment[]): InternalSegment[] {
@@ -128,61 +118,11 @@ class Pipeline {
 		}
 	}
 
-	seek(milliseconds: number): void {
-		if (this._mediaInfo == null || !this._mediaInfo.isSeekable()) {
-			return;
-		}
-
-		const targetSegmentIndex = this._searchSegmentIndexContains(milliseconds);
-
-		if (targetSegmentIndex === this._currentSegmentIndex) {
-			// Intra-segment seeking
-			const segmentInfo = this._mediaInfo.segments?.[targetSegmentIndex];
-
-			if (segmentInfo === undefined) {
-				// Current segment loading started but mediainfo not received yet.
-				// Wait for metadata, then seek to expected position.
-				this._pendingSeekTime = milliseconds;
-			} else {
-				const keyframe = segmentInfo.getNearestKeyframe(milliseconds);
-				(this._remuxer as MP4Remuxer).seek(keyframe?.milliseconds ?? 0);
-				(this._ioctl as FetchLoader).seek(keyframe?.fileposition ?? 0);
-				// Will be resolved in _onRemuxerMediaSegmentArrival
-				this._pendingResolveSeekPoint = keyframe?.milliseconds ?? null;
-			}
-		} else {
-			// Cross-segment seeking
-			const targetSegmentInfo = this._mediaInfo.segments?.[targetSegmentIndex];
-
-			if (targetSegmentInfo === undefined) {
-				// Target segment not loaded yet. Load it, then seek after metadata arrives.
-				this._pendingSeekTime = milliseconds;
-				this._internalAbort();
-				(this._remuxer as MP4Remuxer).seek(0);
-				(this._remuxer as MP4Remuxer).insertDiscontinuity();
-				this._loadSegment(targetSegmentIndex);
-			} else {
-				// Target segment metadata available, seek directly.
-				const keyframe = targetSegmentInfo.getNearestKeyframe(milliseconds);
-				this._internalAbort();
-				(this._remuxer as MP4Remuxer).seek(milliseconds);
-				(this._remuxer as MP4Remuxer).insertDiscontinuity();
-				(this._demuxer as TSDemuxer).resetMediaInfo();
-				(this._demuxer as TSDemuxer).timestampBase = this._segments[targetSegmentIndex].timestampBase;
-				this._loadSegment(targetSegmentIndex, keyframe?.fileposition);
-				this._pendingResolveSeekPoint = keyframe?.milliseconds ?? null;
-				this._reportSegmentMediaInfo(targetSegmentIndex);
-			}
-		}
-	}
-
 	loadSegments(newSegments: PlayerSegment[]): void {
 		// Stop current loading
 		this._internalAbort();
 
 		// Reset internal state
-		this._pendingSeekTime = null;
-		this._pendingResolveSeekPoint = null;
 		this._mediaInfo = null;
 
 		// Setup new segments
@@ -222,7 +162,7 @@ class Pipeline {
 
 	// ---- Private methods ----
 
-	private _loadSegment(segmentIndex: number, optionalFrom?: number): void {
+	private _loadSegment(segmentIndex: number): void {
 		this._currentSegmentIndex = segmentIndex;
 		const segment = this._segments[segmentIndex];
 
@@ -230,7 +170,6 @@ class Pipeline {
 			url: segment.url,
 			cors: segment.cors,
 			withCredentials: segment.withCredentials,
-			filesize: segment.filesize,
 			referrerPolicy: segment.referrerPolicy,
 		};
 
@@ -240,19 +179,10 @@ class Pipeline {
 		ioctl.onError = this._onIOException.bind(this);
 		ioctl.onSeeked = this._onIOSeeked.bind(this);
 		ioctl.onComplete = this._onIOComplete.bind(this) as (extraData: unknown) => void;
-		ioctl.onRecoveredEarlyEof = this._onIORecoveredEarlyEof.bind(this);
 		ioctl.onHLSDetected = () => this._callbacks.onHLSDetected();
 
-		if (optionalFrom != null && this._demuxer) {
-			// Seeking into an already-probed segment: bind demuxer directly
-			(this._demuxer as TSDemuxer).bindDataSource(this._ioctl as unknown as Record<string, unknown>);
-			(this._demuxer as TSDemuxer).timestampBase = this._segments[segmentIndex].timestampBase;
-		} else {
-			// Initial load or loadSegments reload: probe the format, create fresh demuxer+remuxer
-			ioctl.onDataArrival = this._onInitChunkArrival.bind(this);
-		}
-
-		ioctl.open(optionalFrom);
+		ioctl.onDataArrival = this._onInitChunkArrival.bind(this);
+		ioctl.open();
 	}
 
 	private _internalAbort(): void {
@@ -265,30 +195,18 @@ class Pipeline {
 	private _onInitChunkArrival(data: ArrayBuffer, byteStart: number): number {
 		let consumed = 0;
 
-		if (byteStart > 0) {
-			// FetchLoader seeked immediately after open, byteStart > 0 callback received
-			(this._demuxer as TSDemuxer).bindDataSource(this._ioctl as unknown as Record<string, unknown>);
-			(this._demuxer as TSDemuxer).timestampBase = this._segments[this._currentSegmentIndex].timestampBase;
-
+		const probeData = TSDemuxer.probe(data);
+		if ((probeData as Record<string, unknown>).match) {
+			this._setupTSDemuxerRemuxer(probeData);
 			consumed = (this._demuxer as TSDemuxer).parseChunks(data, byteStart);
-		} else {
-			// byteStart === 0: initial data, probe first
-			let probeData: unknown = null;
+		}
 
-			probeData = TSDemuxer.probe(data);
-			if ((probeData as Record<string, unknown>).match) {
-				this._setupTSDemuxerRemuxer(probeData);
-				consumed = (this._demuxer as TSDemuxer).parseChunks(data, byteStart);
-			}
-
-			if (!(probeData as Record<string, unknown>).match && !(probeData as Record<string, unknown>).needMoreData) {
-				probeData = null;
-				Log.e(this.TAG, "Non MPEG-TS, Unsupported media type!");
-				Promise.resolve().then(() => {
-					this._internalAbort();
-				});
-				this._callbacks.onDemuxError(DemuxErrors.FORMAT_UNSUPPORTED, "Non MPEG-TS, Unsupported media type!");
-			}
+		if (!(probeData as Record<string, unknown>).match && !(probeData as Record<string, unknown>).needMoreData) {
+			Log.e(this.TAG, "Non MPEG-TS, Unsupported media type!");
+			Promise.resolve().then(() => {
+				this._internalAbort();
+			});
+			this._callbacks.onDemuxError(DemuxErrors.FORMAT_UNSUPPORTED, "Non MPEG-TS, Unsupported media type!");
 		}
 
 		return consumed;
@@ -333,7 +251,6 @@ class Pipeline {
 		if (this._mediaInfo == null) {
 			// Store first segment's mediainfo as global mediaInfo
 			this._mediaInfo = Object.assign({}, mediaInfo) as MediaInfo;
-			this._mediaInfo.keyframesIndex = null;
 			this._mediaInfo.segments = [];
 			this._mediaInfo.segmentCount = this._segments.length;
 			Object.setPrototypeOf(this._mediaInfo, MediaInfo.prototype);
@@ -345,14 +262,6 @@ class Pipeline {
 
 		// Notify mediaInfo update
 		this._reportSegmentMediaInfo(this._currentSegmentIndex);
-
-		if (this._pendingSeekTime != null) {
-			Promise.resolve().then(() => {
-				const target = this._pendingSeekTime as number;
-				this._pendingSeekTime = null;
-				this.seek(target);
-			});
-		}
 	}
 
 	private _onIOSeeked(): void {
@@ -375,10 +284,6 @@ class Pipeline {
 			}
 			this._callbacks.onLoadingComplete();
 		}
-	}
-
-	private _onIORecoveredEarlyEof(): void {
-		this._callbacks.onRecoveredEarlyEof();
 	}
 
 	private _onIOException(type: string, info: { code: number; msg: string }): void {
@@ -404,26 +309,7 @@ class Pipeline {
 	}
 
 	private _onRemuxerMediaSegmentArrival(type: string, mediaSegment: Record<string, unknown>): void {
-		if (this._pendingSeekTime != null) {
-			// Media segments after new-segment cross-seeking should be dropped.
-			return;
-		}
 		this._callbacks.onMediaSegment(type, mediaSegment as { type: string; data?: ArrayBuffer });
-
-		// Resolve pending seekPoint
-		if (this._pendingResolveSeekPoint != null && type === "video") {
-			const info = mediaSegment.info as Record<string, unknown>;
-			const syncPoints = info.syncPoints as Array<Record<string, unknown>>;
-			let seekpoint = this._pendingResolveSeekPoint;
-			this._pendingResolveSeekPoint = null;
-
-			// Safari: Pass PTS for recommend_seekpoint
-			if (Browser.safari && syncPoints.length > 0 && syncPoints[0].originalDts === seekpoint) {
-				seekpoint = syncPoints[0].pts as number;
-			}
-
-			this._callbacks.onRecommendSeekpoint(seekpoint);
-		}
 	}
 
 	private _reportSegmentMediaInfo(segmentIndex: number): void {
@@ -433,23 +319,10 @@ class Pipeline {
 		exportInfo.duration = this._mediaInfo?.duration;
 		exportInfo.segmentCount = this._mediaInfo?.segmentCount;
 		delete exportInfo.segments;
-		delete exportInfo.keyframesIndex;
 
 		this._callbacks.onMediaInfo(exportInfo);
 	}
 
-	private _searchSegmentIndexContains(milliseconds: number): number {
-		const segments = this._segments;
-		let idx = segments.length - 1;
-
-		for (let i = 0; i < segments.length; i++) {
-			if (milliseconds < segments[i].timestampBase) {
-				idx = i - 1;
-				break;
-			}
-		}
-		return idx;
-	}
 }
 
 export default Pipeline;

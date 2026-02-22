@@ -36,9 +36,6 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 		onLoadingComplete() {
 			post({ type: "complete", gen });
 		},
-		onRecoveredEarlyEof() {
-			// silently recovered, no action needed
-		},
 		onMediaInfo(info) {
 			post({ type: "media-info", info, gen });
 		},
@@ -47,9 +44,6 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 		},
 		onDemuxError(type, info) {
 			post({ type: "error", category: "demux", detail: type, info, gen });
-		},
-		onRecommendSeekpoint(_milliseconds) {
-			// Not needed in new architecture - seek is handled differently
 		},
 		onHLSDetected() {
 			post({ type: "hls-detected", gen });
