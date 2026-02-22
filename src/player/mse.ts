@@ -380,10 +380,6 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 				}
 			}
 
-			// Safari audio/mpeg duration workaround
-			if (Browser.safari && track === "audio" && container === "audio/mpeg") {
-				updateMediaSourceDuration();
-			}
 		},
 
 		appendMedia(track: Track, data: ArrayBuffer): void {
@@ -494,17 +490,6 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 			sourceOpenCallback = null;
 		},
 	};
-
-	function updateMediaSourceDuration(): void {
-		if (!mediaSource || mediaSource.readyState !== "open") {
-			return;
-		}
-		const sbVideo = sourceBuffers.video;
-		const sbAudio = sourceBuffers.audio;
-		if (video.readyState === 0 || sbVideo?.updating || sbAudio?.updating) {
-			return;
-		}
-	}
 
 	return mse;
 }
