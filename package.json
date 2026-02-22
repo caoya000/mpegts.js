@@ -36,7 +36,8 @@
 		"dev": "vite",
 		"preview": "vite preview",
 		"type-check": "tsc --noEmit",
-		"check": "biome check --write ."
+		"lint": "biome check .",
+		"format": "biome check --fix ."
 	},
 	"dependencies": {},
 	"devDependencies": {
