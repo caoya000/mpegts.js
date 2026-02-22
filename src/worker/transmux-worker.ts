@@ -51,6 +51,9 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 		onRecommendSeekpoint(_milliseconds) {
 			// Not needed in new architecture - seek is handled differently
 		},
+		onHLSDetected() {
+			post({ type: "hls-detected", gen });
+		},
 	};
 
 	return new Pipeline(segments, config, callbacks);

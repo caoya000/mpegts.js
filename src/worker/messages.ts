@@ -13,4 +13,5 @@ export type WorkerEvent =
 	| { type: "media-segment"; track: "video" | "audio"; data: ArrayBuffer; gen: number }
 	| { type: "media-info"; info: unknown; gen: number }
 	| { type: "complete"; gen: number }
-	| { type: "error"; category: "io" | "demux"; detail: string; info?: string; gen: number };
+	| { type: "error"; category: "io" | "demux"; detail: string; info?: string; gen: number }
+	| { type: "hls-detected"; gen: number };

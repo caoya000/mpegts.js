@@ -34,6 +34,7 @@ export interface PipelineCallbacks {
 	onIOError: (type: string, info: { code: number; msg: string }) => void;
 	onDemuxError: (type: string, info: string) => void;
 	onRecommendSeekpoint: (milliseconds: number) => void;
+	onHLSDetected: () => void;
 }
 
 interface InternalSegment {
@@ -244,6 +245,7 @@ class Pipeline {
 		ioctl.onComplete = this._onIOComplete.bind(this) as (extraData: unknown) => void;
 		ioctl.onRedirect = this._onIORedirect.bind(this);
 		ioctl.onRecoveredEarlyEof = this._onIORecoveredEarlyEof.bind(this);
+		ioctl.onHLSDetected = () => this._callbacks.onHLSDetected();
 
 		if (optionalFrom != null && this._demuxer) {
 			// Seeking into an already-probed segment: bind demuxer directly

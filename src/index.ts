@@ -12,12 +12,6 @@ import {
 
 export type { Player, PlayerConfig, PlayerError, PlayerEventMap, PlayerSegment };
 
-function detectStreamType(url: string): "mpegts" | "hls" {
-	const lower = url.toLowerCase();
-	if (lower.includes(".m3u8") || lower.includes("mpegurl")) return "hls";
-	return "mpegts";
-}
-
 export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerConfig>): Player {
 	const fullConfig: PlayerConfig = { ...defaultPlayerConfig, ...config };
 	let destroyed = false;
@@ -28,6 +22,7 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 	// Cached impls — created on demand, kept alive across type switches
 	const cache: Record<string, PlayerImpl> = {};
 	let activeType: string | null = null;
+	let lastSegments: PlayerSegment[] = [];
 
 	function setErrorHandler(impl: PlayerImpl): void {
 		impl.onError = (e) => {
@@ -37,9 +32,19 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 		};
 	}
 
-	function ensureImpl(firstSegmentUrl: string): PlayerImpl {
-		const type = detectStreamType(firstSegmentUrl);
+	function getOrCreateImpl(type: "mpegts" | "hls"): PlayerImpl {
+		if (!cache[type]) {
+			const impl =
+				type === "hls"
+					? createHlsPlayer(video, fullConfig, seekHandlers)
+					: createMpegtsPlayer(video, fullConfig, seekHandlers);
+			setErrorHandler(impl);
+			cache[type] = impl;
+		}
+		return cache[type];
+	}
 
+	function switchTo(type: "mpegts" | "hls"): PlayerImpl {
 		if (activeType === type && cache[type]) {
 			return cache[type];
 		}
@@ -49,24 +54,24 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 			cache[activeType].suspend();
 		}
 
-		// Get from cache or create
-		if (!cache[type]) {
-			const impl =
-				type === "hls"
-					? createHlsPlayer(video, fullConfig, seekHandlers)
-					: createMpegtsPlayer(video, fullConfig, seekHandlers);
-			setErrorHandler(impl);
-			cache[type] = impl;
-		}
-
 		activeType = type;
-		return cache[type];
+		return getOrCreateImpl(type);
+	}
+
+	function setupHLSDetection(impl: PlayerImpl): void {
+		impl.onHLSDetected = () => {
+			if (destroyed || !lastSegments.length) return;
+			const hlsImpl = switchTo("hls");
+			hlsImpl.loadSegments(lastSegments);
+		};
 	}
 
 	return {
 		loadSegments(segments: PlayerSegment[]) {
 			if (destroyed || !segments.length) return;
-			const impl = ensureImpl(segments[0].url);
+			lastSegments = segments;
+			const impl = switchTo("mpegts");
+			setupHLSDetection(impl);
 			impl.loadSegments(segments);
 		},
 

@@ -52,6 +52,9 @@ export function createMpegtsPlayer(
 				break;
 			case "media-info":
 				break;
+			case "hls-detected":
+				impl.onHLSDetected?.();
+				break;
 		}
 	}
 

@@ -44,6 +44,7 @@ export interface Player {
 /** Internal player implementation interface */
 export interface PlayerImpl {
 	onError: ((error: PlayerError) => void) | null;
+	onHLSDetected?: (() => void) | null;
 	loadSegments(segments: PlayerSegment[]): void;
 	seek(seconds: number): void;
 	setLiveSync(enabled: boolean): void;

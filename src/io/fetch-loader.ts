@@ -66,6 +66,7 @@ class FetchLoader {
 	onComplete: ((extraData: unknown) => void) | null;
 	onRedirect: ((redirectedURL: string) => void) | null;
 	onRecoveredEarlyEof: (() => void) | null;
+	onHLSDetected: (() => void) | null;
 
 	// --- config / data source ---
 	private _config: MediaConfig;
@@ -158,6 +159,7 @@ class FetchLoader {
 		this.onComplete = null;
 		this.onRedirect = null;
 		this.onRecoveredEarlyEof = null;
+		this.onHLSDetected = null;
 	}
 
 	destroy(): void {
@@ -179,6 +181,7 @@ class FetchLoader {
 		this.onComplete = null;
 		this.onRedirect = null;
 		this.onRecoveredEarlyEof = null;
+		this.onHLSDetected = null;
 
 		this._extraData = null;
 	}
@@ -365,6 +368,15 @@ class FetchLoader {
 				}
 
 				if (res.ok && res.status >= 200 && res.status <= 299) {
+					// detect HLS content-type before processing body
+					const ct = res.headers.get("Content-Type")?.toLowerCase() ?? "";
+					if (ct.includes("mpegurl") || ct.includes("m3u")) {
+						res.body?.cancel();
+						this._status = LoaderStatus.kIdle;
+						this.onHLSDetected?.();
+						return;
+					}
+
 					// detect redirect
 					if (res.url !== seekConfig.url) {
 						this._redirectedURL = res.url;
