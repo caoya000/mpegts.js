@@ -1,12 +1,17 @@
-# mpegts.js [![npm](https://img.shields.io/npm/v/mpegts.js.svg?style=flat)](https://www.npmjs.com/package/mpegts.js)
-
-[日本語](README_ja.md) [中文说明](README_zh.md)
+# @rtp2httpd/mpegts.js
 
 HTML5 MPEG2-TS stream player written in TypeScript & JavaScript.
 
-mpegts.js is optimized for low-latency live stream playback, such as DVB/ISDB television or surveillance cameras.
+This is a fork of [mpegts.js](https://github.com/xqq/mpegts.js) tailored for [rtp2httpd](https://github.com/stackia/rtp2httpd), with a focus on smaller bundle size and modern tooling.
 
-This project is based on [flv.js](https://github.com/bilibili/flv.js).
+## Changes from upstream
+
+- **Build system**: Migrated from webpack to Vite
+- **Removed FLV support**: FLV demuxer / `NativePlayer` removed (MPEG-TS only)
+- **Removed legacy IO loaders**: `MozChunkedLoader`, `MSStreamLoader`, `RangeLoader`, `WebSocketLoader` removed — only `FetchStreamLoader` is kept
+- **Removed AV1 over MPEG-TS support**
+- **Code formatting**: Reformatted with Prettier, cleaned up polyfills
+- **Package manager**: Migrated from npm to pnpm
 
 ## Overview
 
@@ -14,80 +19,32 @@ mpegts.js works by transmuxing MPEG2-TS stream into ISO BMFF (Fragmented MP4) se
 
 [Media Source Extensions]: https://w3c.github.io/media-source/
 
-## News
-
-- **v1.8.0**
-
-  Support working on **iOS Safari** with iOS 17.1+ through Apple's [ManagedMediaSource API](https://github.com/w3c/media-source/issues/320)
-
-  Great performance improvements by supporting [MSE in Workers](https://github.com/w3c/media-source/issues/175) on Chrome, Safari 18 (includes iOS)
-
-  Introduced support for [AV1 over MPEG-TS](https://aomediacodec.github.io/av1-mpeg2-ts/)
-
-  Introduced support for AV1 over HTTP-FLV defined in [Enhanced RTMP](https://github.com/veovera/enhanced-rtmp)
-
-  Support chasing live latency more smoothly by changing playback rate
-
-  Introduced ATSC EAC-3 audio codec in MPEG-TS
-
-  Support Opus and FLAC audio codec over HTTP-FLV (Enhanced RTMP)
-
-- **v1.7.3**
-
-  Introduced [Enhanced RTMP] with HEVC support for FLV.
-
-  Introduced Opus and ATSC AC-3 audio codec support for MPEG-TS.
-
-  Introduced LOAS AAC support for MPEG-TS.
-
-- **v1.7.0**
-
-  Introduced H.265/HEVC over MPEG-TS/FLV support.
-
-[Enhanced RTMP]: https://github.com/veovera/enhanced-rtmp
-
-## Demo
-
-[http://xqq.github.io/mpegts.js/demo/](http://xqq.github.io/mpegts.js/demo/)
-
-[demo with aribb24.js](http://xqq.github.io/mpegts.js/demo/arib.html)
-
 ## Features
 
-- Playback for MPEG2-TS stream with H.264/H.265 + AAC codec transported in http(s) or WebSocket
-- Playback for FLV stream with H.264/H.265 + AAC codec transported in http(s) or WebSocket
+- Playback for MPEG2-TS stream with H.264/H.265 + AAC codec transported in http(s)
 - Extremely low latency of less than 1 second in the best case
 - Playback for `.m2ts` file like BDAV/BDMV with 192 bytes TS packet, or 204 bytes TS packet
 - Support handling dynamic codec parameters change (e.g. video resolution change)
-- Support Chrome, FireFox, Safari, Edge (Old or Chromium) or any Chromium-based browsers
+- Support Chrome, Firefox, Safari, Edge or any Chromium-based browsers
 - Support chasing latency automatically for internal buffer of HTMLMediaElement
-- Low CPU overhead and low memory usage (JS heap takes about 10MiB for each instance)
+- Low CPU overhead and low memory usage
 - Support extracting PES private data (stream_type=0x06) like ARIB B24 subtitles (with [aribb24.js][])
 - Support Timed ID3 Metadata (stream_type=0x15) callback (TIMED_ID3_METADATA_ARRIVED)
 
 [aribb24.js]: https://github.com/monyone/aribb24.js
 
-## CORS
-
-If you use standalone video server for MPEG2-TS stream, `Access-Control-Allow-Origin` header must be configured correctly on video server for cross-origin resource fetching.
-
-See [cors.md](docs/cors.md) for more details.
-
 ## Installation
 
 ```bash
-npm install --save mpegts.js
+pnpm add @rtp2httpd/mpegts.js
 ```
 
 ## Build
 
 ```bash
-npm install                 # install dev-dependencies
-npm install -g webpack-cli  # install build tool
-npm run build               # packaged & minimized js will be emitted in dist folder
+pnpm install
+pnpm build
 ```
-
-[cnpm](https://github.com/cnpm/cnpm) mirror is recommended if you are in Mainland China.
 
 ## Getting Started
 
@@ -98,7 +55,7 @@ npm run build               # packaged & minimized js will be emitted in dist fo
   if (mpegts.getFeatureList().mseLivePlayback) {
     var videoElement = document.getElementById("videoElement");
     var player = mpegts.createPlayer({
-      type: "mse", // could also be mpegts, m2ts, flv
+      type: "mse", // could also be mpegts, m2ts
       isLive: true,
       url: "http://example.com/live/livestream.ts",
     });
@@ -108,56 +65,6 @@ npm run build               # packaged & minimized js will be emitted in dist fo
   }
 </script>
 ```
-
-mpegts.js could be tested with [Simple Realtime Server](https://github.com/ossrs/srs/).
-
-## TODO
-
-- MPEG2-TS static file playback (seeking is not supported now)
-
-## Limitations
-
-- mpeg2video is not supported
-- HTTP MPEG2-TS live stream could not work on old browsers like IE11
-- mpegts.js is not usable on iOS version 17.0 or older caused by the banning of [Media Source Extensions][] (available on iPadOS), iOS 17.1 works through Managed Media Source API
-
-## Features inherited from flv.js
-
-- FLV container with H.264 + AAC / MP3 codec playback
-- Multipart segmented video playback
-- HTTP FLV low latency live stream playback
-- FLV over WebSocket live stream playback
-- Compatible with Chrome, FireFox, Safari 10, IE11 and Edge
-- Extremely low overhead, and hardware accelerated by your browser!
-
-## FLV playback limitations
-
-- MP3 audio codec is currently not working on IE11 / Edge
-- HTTP FLV live stream is not currently working on all browsers, see [livestream.md](docs/livestream.md)
-
-## FLV Multipart playback
-
-You only have to provide a playlist for `MediaDataSource`. See [multipart.md](docs/multipart.md)
-
-## Livestream playback
-
-See [livestream.md](docs/livestream.md)
-
-## API and Configuration
-
-See [api.md](docs/api.md)
-
-## Debug
-
-```bash
-npm install                 # install dev-dependencies
-npm install -g webpack-cli  # install build tool
-npm run build:debug         # packaged & minimized js will be emitted in dist folder
-```
-
-## Design
-
-See [design.md](docs/design.md)
 
 ## License
 
