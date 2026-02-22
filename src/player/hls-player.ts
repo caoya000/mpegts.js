@@ -44,7 +44,11 @@ export function createHlsPlayer(
 			segments = newSegments;
 			currentIndex = 0;
 			bindListeners();
+			const wasPlaying = !video.paused;
 			video.src = segments[0].url;
+			if (wasPlaying) {
+				video.play();
+			}
 		},
 
 		setLiveSync(_enabled: boolean) {
