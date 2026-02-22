@@ -110,9 +110,8 @@ export function createMpegtsPlayer(
 		if (!destroyLiveSync && config.liveSync) {
 			destroyLiveSync = setupLiveSync(video, config);
 		}
-		if (!destroyStallJumper) {
-			destroyStallJumper = setupStartupStallJumper(video);
-		}
+		destroyStallJumper?.();
+		destroyStallJumper = setupStartupStallJumper(video);
 	}
 
 	const impl: PlayerImpl = {

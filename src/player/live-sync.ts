@@ -1,4 +1,7 @@
 import type { PlayerConfig } from "../types";
+import Log from "../utils/logger";
+
+const TAG = "LiveSync";
 
 /** Sets up live latency synchronization by adjusting playbackRate on timeupdate events. */
 export function setupLiveSync(video: HTMLMediaElement, config: PlayerConfig): () => void {
@@ -45,7 +48,9 @@ export function setupStartupStallJumper(video: HTMLMediaElement): () => void {
 		const buffered = video.buffered;
 		if (isStalled || !canplayReceived || video.readyState < 2) {
 			if (buffered.length > 0 && video.currentTime < buffered.start(0)) {
-				video.currentTime = buffered.start(0);
+				const target = buffered.start(0);
+				Log.w(TAG, `Playback stuck at ${video.currentTime}, seeking to ${target}`);
+				video.currentTime = target;
 				video.removeEventListener("progress", onProgress);
 			}
 		} else {
