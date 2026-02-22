@@ -2,7 +2,6 @@ import type { MediaConfig } from "../config";
 import Browser from "../utils/browser";
 import { IllegalStateException, RuntimeException } from "../utils/exception";
 import Log from "../utils/logger";
-import SpeedSampler from "./speed-sampler";
 
 /**
  * Simplified, self-contained fetch loader that combines the responsibilities of
@@ -21,7 +20,6 @@ export interface DataSource {
 	filesize?: number;
 	cors?: boolean;
 	withCredentials?: boolean;
-	redirectedURL?: string;
 	referrerPolicy?: ReferrerPolicy;
 }
 
@@ -64,7 +62,6 @@ class FetchLoader {
 	onSeeked: (() => void) | null;
 	onError: ((type: string, info: LoaderErrorInfo) => void) | null;
 	onComplete: ((extraData: unknown) => void) | null;
-	onRedirect: ((redirectedURL: string) => void) | null;
 	onRecoveredEarlyEof: (() => void) | null;
 	onHLSDetected: (() => void) | null;
 
@@ -74,25 +71,16 @@ class FetchLoader {
 	private _extraData: unknown;
 
 	// --- stash buffer ---
-	private _stashInitialSize: number;
 	private _stashUsed: number;
-	private _stashSize: number;
 	private _bufferSize: number;
 	private _stashBuffer: ArrayBuffer | null;
 	private _stashByteStart: number;
-	private _enableStash: boolean;
 
 	// --- range / length tracking ---
 	private _currentRange: LoaderRange | null;
 	private _refTotalLength: number | null;
 	private _totalLength: number | null;
 	private _fullRequestFlag: boolean;
-	private _redirectedURL: string | null;
-
-	// --- speed sampling ---
-	private _speedSampler: SpeedSampler | null;
-	private _speedNormalized: number;
-	private _speedNormalizeList: number[];
 
 	// --- reconnect ---
 	private _isEarlyEofReconnecting: boolean;
@@ -114,29 +102,16 @@ class FetchLoader {
 		this._extraData = extraData;
 
 		// stash buffer setup
-		this._stashInitialSize = 64 * 1024; // 64 KB default
-		if (config.stashInitialSize !== undefined && config.stashInitialSize > 0) {
-			this._stashInitialSize = config.stashInitialSize;
-		}
-
 		this._stashUsed = 0;
-		this._stashSize = this._stashInitialSize;
-		this._bufferSize = Math.max(this._stashSize, 1024 * 1024 * 3); // at least 3 MB
+		this._bufferSize = 1024 * 1024; // 1 MB
 		this._stashBuffer = new ArrayBuffer(this._bufferSize);
 		this._stashByteStart = 0;
-		this._enableStash = config.enableStashBuffer !== false;
 
 		// range / length
 		this._currentRange = null;
 		this._refTotalLength = dataSource.filesize ? dataSource.filesize : null;
 		this._totalLength = this._refTotalLength;
 		this._fullRequestFlag = false;
-		this._redirectedURL = null;
-
-		// speed
-		this._speedSampler = new SpeedSampler();
-		this._speedNormalized = 0;
-		this._speedNormalizeList = [32, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096];
 
 		// reconnect
 		this._isEarlyEofReconnecting = false;
@@ -157,7 +132,6 @@ class FetchLoader {
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onRedirect = null;
 		this.onRecoveredEarlyEof = null;
 		this.onHLSDetected = null;
 	}
@@ -169,9 +143,8 @@ class FetchLoader {
 
 		this._dataSource = null;
 		this._stashBuffer = null;
-		this._stashUsed = this._stashSize = this._bufferSize = this._stashByteStart = 0;
+		this._stashUsed = this._bufferSize = this._stashByteStart = 0;
 		this._currentRange = null;
-		this._speedSampler = null;
 		this._status = LoaderStatus.kIdle;
 		this._isEarlyEofReconnecting = false;
 
@@ -179,7 +152,6 @@ class FetchLoader {
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onRedirect = null;
 		this.onRecoveredEarlyEof = null;
 		this.onHLSDetected = null;
 
@@ -208,19 +180,6 @@ class FetchLoader {
 		return this._dataSource?.url ?? "";
 	}
 
-	get hasRedirect(): boolean {
-		return this._redirectedURL != null || this._dataSource?.redirectedURL !== undefined;
-	}
-
-	get currentRedirectedURL(): string | undefined {
-		return this._redirectedURL || this._dataSource?.redirectedURL;
-	}
-
-	/** Current download speed in KB/s. */
-	get currentSpeed(): number {
-		return this._speedSampler?.lastSecondKBps ?? 0;
-	}
-
 	get loaderType(): string {
 		return "fetch-stream-loader";
 	}
@@ -233,7 +192,6 @@ class FetchLoader {
 			this._currentRange.from = optionalFrom;
 		}
 
-		this._speedSampler?.reset();
 		if (!optionalFrom) {
 			this._fullRequestFlag = true;
 		}
@@ -295,8 +253,6 @@ class FetchLoader {
 				param = `bytes=${range.from.toString()}-`;
 			}
 			headers.Range = param;
-		} else if (this._config.rangeLoadZeroStart) {
-			headers.Range = "bytes=0-";
 		}
 
 		return { url, headers };
@@ -310,10 +266,7 @@ class FetchLoader {
 		this._receivedLength = 0;
 
 		const dataSource = this._dataSource as DataSource;
-		let sourceURL = dataSource.url;
-		if (this._config.reuseRedirectedURL && dataSource.redirectedURL !== undefined) {
-			sourceURL = dataSource.redirectedURL;
-		}
+		const sourceURL = dataSource.url;
 
 		const seekConfig = this._buildRangeHeaders(sourceURL, range);
 
@@ -375,14 +328,6 @@ class FetchLoader {
 						this._status = LoaderStatus.kIdle;
 						this.onHLSDetected?.();
 						return;
-					}
-
-					// detect redirect
-					if (res.url !== seekConfig.url) {
-						this._redirectedURL = res.url;
-						if (this.onRedirect) {
-							this.onRedirect(res.url);
-						}
 					}
 
 					// content-length
@@ -523,9 +468,6 @@ class FetchLoader {
 		const requestRange: LoaderRange = { from: bytes, to: -1 };
 		this._currentRange = { from: requestRange.from, to: -1 };
 
-		this._speedSampler?.reset();
-		this._stashSize = this._stashInitialSize;
-
 		this._requestAbort = false;
 		this._startFetch(requestRange);
 
@@ -537,12 +479,10 @@ class FetchLoader {
 	// --- stash buffer management (from IOController) -------------------------
 
 	private _expandBuffer(expectedBytes: number): void {
-		let bufferNewSize = this._stashSize;
-		while (bufferNewSize + 1024 * 1024 * 1 < expectedBytes) {
+		let bufferNewSize = this._bufferSize;
+		while (bufferNewSize < expectedBytes) {
 			bufferNewSize *= 2;
 		}
-
-		bufferNewSize += 1024 * 1024 * 1; // stashSize + 1 MB
 		if (bufferNewSize === this._bufferSize) {
 			return;
 		}
@@ -557,58 +497,6 @@ class FetchLoader {
 
 		this._stashBuffer = newBuffer;
 		this._bufferSize = bufferNewSize;
-	}
-
-	private _normalizeSpeed(input: number): number {
-		const list = this._speedNormalizeList;
-		const last = list.length - 1;
-		let mid = 0;
-		let lbound = 0;
-		let ubound = last;
-
-		if (input < list[0]) {
-			return list[0];
-		}
-
-		// binary search
-		while (lbound <= ubound) {
-			mid = lbound + Math.floor((ubound - lbound) / 2);
-			if (mid === last || (input >= list[mid] && input < list[mid + 1])) {
-				return list[mid];
-			} else if (list[mid] < input) {
-				lbound = mid + 1;
-			} else {
-				ubound = mid - 1;
-			}
-		}
-
-		return list[last];
-	}
-
-	private _adjustStashSize(normalized: number): void {
-		let stashSizeKB = 0;
-
-		if (this._config.isLive) {
-			stashSizeKB = normalized / 8;
-		} else {
-			if (normalized < 512) {
-				stashSizeKB = normalized;
-			} else if (normalized >= 512 && normalized <= 1024) {
-				stashSizeKB = Math.floor(normalized * 1.5);
-			} else {
-				stashSizeKB = normalized * 2;
-			}
-		}
-
-		if (stashSizeKB > 8192) {
-			stashSizeKB = 8192;
-		}
-
-		const bufferSize = stashSizeKB * 1024 + 1024 * 1024 * 1; // stashSize + 1 MB
-		if (this._bufferSize < bufferSize) {
-			this._expandBuffer(bufferSize);
-		}
-		this._stashSize = stashSizeKB * 1024;
 	}
 
 	private _dispatchChunks(chunks: ArrayBuffer, byteStart: number): number {
@@ -659,99 +547,37 @@ class FetchLoader {
 			}
 		}
 
-		this._speedSampler?.addBytes(chunk.byteLength);
-
-		// adjust stash buffer size according to network speed dynamically
-		const KBps = this._speedSampler?.lastSecondKBps ?? 0;
-		if (KBps !== 0) {
-			const normalized = this._normalizeSpeed(KBps);
-			if (this._speedNormalized !== normalized) {
-				this._speedNormalized = normalized;
-				this._adjustStashSize(normalized);
-			}
-		}
-
-		if (!this._enableStash) {
-			// stash disabled: dispatch directly, buffer only unconsumed bytes
-			if (this._stashUsed === 0) {
-				const consumed = this._dispatchChunks(chunk, byteStart);
-				if (consumed < chunk.byteLength) {
-					const remain = chunk.byteLength - consumed;
-					if (remain > this._bufferSize) {
-						this._expandBuffer(remain);
-					}
-					const stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
-					stashArray.set(new Uint8Array(chunk, consumed), 0);
-					this._stashUsed += remain;
-					this._stashByteStart = byteStart + consumed;
-				}
-			} else {
-				// merge chunk into stash, then dispatch
-				if (this._stashUsed + chunk.byteLength > this._bufferSize) {
-					this._expandBuffer(this._stashUsed + chunk.byteLength);
+		// dispatch directly, buffer only unconsumed bytes
+		if (this._stashUsed === 0) {
+			const consumed = this._dispatchChunks(chunk, byteStart);
+			if (consumed < chunk.byteLength) {
+				const remain = chunk.byteLength - consumed;
+				if (remain > this._bufferSize) {
+					this._expandBuffer(remain);
 				}
 				const stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
-				stashArray.set(new Uint8Array(chunk), this._stashUsed);
-				this._stashUsed += chunk.byteLength;
-				const consumed = this._dispatchChunks(
-					(this._stashBuffer as ArrayBuffer).slice(0, this._stashUsed),
-					this._stashByteStart,
-				);
-				if (consumed < this._stashUsed && consumed > 0) {
-					const remainArray = new Uint8Array(this._stashBuffer as ArrayBuffer, consumed);
-					stashArray.set(remainArray, 0);
-				}
-				this._stashUsed -= consumed;
-				this._stashByteStart += consumed;
+				stashArray.set(new Uint8Array(chunk, consumed), 0);
+				this._stashUsed += remain;
+				this._stashByteStart = byteStart + consumed;
 			}
 		} else {
-			// stash enabled: buffer until stashSize exceeded, then dispatch
-			if (this._stashUsed === 0 && this._stashByteStart === 0) {
-				this._stashByteStart = byteStart;
+			// merge chunk into stash, then dispatch
+			if (this._stashUsed + chunk.byteLength > this._bufferSize) {
+				this._expandBuffer(this._stashUsed + chunk.byteLength);
 			}
-			if (this._stashUsed + chunk.byteLength <= this._stashSize) {
-				// just stash
-				const stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._stashSize);
-				stashArray.set(new Uint8Array(chunk), this._stashUsed);
-				this._stashUsed += chunk.byteLength;
-			} else {
-				// stashUsed + chunkSize > stashSize, size limit exceeded
-				let stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
-				if (this._stashUsed > 0) {
-					const buffer = (this._stashBuffer as ArrayBuffer).slice(0, this._stashUsed);
-					const consumed = this._dispatchChunks(buffer, this._stashByteStart);
-					if (consumed < buffer.byteLength) {
-						if (consumed > 0) {
-							const remainArray = new Uint8Array(buffer, consumed);
-							stashArray.set(remainArray, 0);
-							this._stashUsed = remainArray.byteLength;
-							this._stashByteStart += consumed;
-						}
-					} else {
-						this._stashUsed = 0;
-						this._stashByteStart += consumed;
-					}
-					if (this._stashUsed + chunk.byteLength > this._bufferSize) {
-						this._expandBuffer(this._stashUsed + chunk.byteLength);
-						stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
-					}
-					stashArray.set(new Uint8Array(chunk), this._stashUsed);
-					this._stashUsed += chunk.byteLength;
-				} else {
-					// stash buffer empty but chunkSize > stashSize
-					const consumed = this._dispatchChunks(chunk, byteStart);
-					if (consumed < chunk.byteLength) {
-						const remain = chunk.byteLength - consumed;
-						if (remain > this._bufferSize) {
-							this._expandBuffer(remain);
-							stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
-						}
-						stashArray.set(new Uint8Array(chunk, consumed), 0);
-						this._stashUsed += remain;
-						this._stashByteStart = byteStart + consumed;
-					}
-				}
+			const stashArray = new Uint8Array(this._stashBuffer as ArrayBuffer, 0, this._bufferSize);
+			stashArray.set(new Uint8Array(chunk), this._stashUsed);
+			this._stashUsed += chunk.byteLength;
+			const consumed = this._dispatchChunks(
+				(this._stashBuffer as ArrayBuffer).slice(0, this._stashUsed),
+				this._stashByteStart,
+			);
+			if (consumed < this._stashUsed && consumed > 0) {
+				const remainArray = new Uint8Array(this._stashBuffer as ArrayBuffer, consumed);
+				stashArray.set(remainArray, 0);
 			}
+			this._stashUsed -= consumed;
+			this._stashByteStart += consumed;
 		}
 	}
 

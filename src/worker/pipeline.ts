@@ -44,7 +44,6 @@ interface InternalSegment {
 	cors: boolean;
 	withCredentials: boolean;
 	filesize?: number;
-	redirectedURL?: string;
 	referrerPolicy?: ReferrerPolicy;
 }
 
@@ -75,7 +74,6 @@ class Pipeline {
 		mediaConfig.liveSyncMaxLatency = config.liveSyncMaxLatency;
 		mediaConfig.liveSyncTargetLatency = config.liveSyncTargetLatency;
 		mediaConfig.liveSyncPlaybackRate = config.liveSyncPlaybackRate;
-		mediaConfig.enableStashBuffer = config.enableStashBuffer;
 		this._config = mediaConfig;
 
 		this._segments = this._buildSegments(segments);
@@ -233,7 +231,6 @@ class Pipeline {
 			cors: segment.cors,
 			withCredentials: segment.withCredentials,
 			filesize: segment.filesize,
-			redirectedURL: segment.redirectedURL,
 			referrerPolicy: segment.referrerPolicy,
 		};
 
@@ -243,7 +240,6 @@ class Pipeline {
 		ioctl.onError = this._onIOException.bind(this);
 		ioctl.onSeeked = this._onIOSeeked.bind(this);
 		ioctl.onComplete = this._onIOComplete.bind(this) as (extraData: unknown) => void;
-		ioctl.onRedirect = this._onIORedirect.bind(this);
 		ioctl.onRecoveredEarlyEof = this._onIORecoveredEarlyEof.bind(this);
 		ioctl.onHLSDetected = () => this._callbacks.onHLSDetected();
 
@@ -379,11 +375,6 @@ class Pipeline {
 			}
 			this._callbacks.onLoadingComplete();
 		}
-	}
-
-	private _onIORedirect(redirectedURL: string): void {
-		const segmentIndex = (this._ioctl as FetchLoader).extraData as number;
-		this._segments[segmentIndex].redirectedURL = redirectedURL;
 	}
 
 	private _onIORecoveredEarlyEof(): void {

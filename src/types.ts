@@ -9,7 +9,6 @@ export interface PlayerConfig {
 	liveSyncMaxLatency: number;
 	liveSyncTargetLatency: number;
 	liveSyncPlaybackRate: number;
-	enableStashBuffer: boolean;
 }
 
 export const defaultPlayerConfig: PlayerConfig = {
@@ -18,7 +17,6 @@ export const defaultPlayerConfig: PlayerConfig = {
 	liveSyncMaxLatency: 1.2,
 	liveSyncTargetLatency: 0.8,
 	liveSyncPlaybackRate: 1.2,
-	enableStashBuffer: true,
 };
 
 export interface PlayerError {
