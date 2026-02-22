@@ -50,7 +50,6 @@ class IOController {
 	private _seekHandler: SeekHandler | null;
 
 	private _dataSource: DataSource | null;
-	private _isWebSocketURL: boolean;
 	private _refTotalLength: number | null;
 	private _totalLength: number | null;
 	private _fullRequestFlag: boolean;
@@ -100,7 +99,6 @@ class IOController {
 		this._seekHandler = null;
 
 		this._dataSource = dataSource;
-		this._isWebSocketURL = /wss?:\/\/(.+?)/.test(dataSource.url);
 		this._refTotalLength = dataSource.filesize ? dataSource.filesize : null;
 		this._totalLength = this._refTotalLength;
 		this._fullRequestFlag = false;
@@ -267,8 +265,6 @@ class IOController {
 	private _selectLoader(): void {
 		if (this._config.customLoader != null) {
 			this._loaderClass = this._config.customLoader as LoaderClass;
-		} else if (this._isWebSocketURL) {
-			throw new Error("WebSocketLoader is explicitly disabled");
 		} else if (FetchStreamLoader.isSupported()) {
 			this._loaderClass = FetchStreamLoader;
 		} else {

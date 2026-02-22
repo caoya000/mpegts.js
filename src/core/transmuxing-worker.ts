@@ -30,8 +30,6 @@ self.addEventListener("message", (e: MessageEvent) => {
 			controller.on(TransmuxingEvents.LOADING_COMPLETE, onLoadingComplete.bind(self));
 			controller.on(TransmuxingEvents.RECOVERED_EARLY_EOF, onRecoveredEarlyEof.bind(self));
 			controller.on(TransmuxingEvents.MEDIA_INFO, onMediaInfo.bind(self));
-			controller.on(TransmuxingEvents.METADATA_ARRIVED, onMetaDataArrived.bind(self));
-			controller.on(TransmuxingEvents.SCRIPTDATA_ARRIVED, onScriptDataArrived.bind(self));
 			controller.on(TransmuxingEvents.TIMED_ID3_METADATA_ARRIVED, onTimedID3MetadataArrived.bind(self));
 			controller.on(TransmuxingEvents.PGS_SUBTITLE_ARRIVED, onPGSSubtitleDataArrived.bind(self));
 			controller.on(TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, onSynchronousKLVMetadataArrived.bind(self));
@@ -130,22 +128,6 @@ function onMediaInfo(mediaInfo: unknown): void {
 	const obj = {
 		msg: TransmuxingEvents.MEDIA_INFO,
 		data: mediaInfo,
-	};
-	postWorkerMessage(obj);
-}
-
-function onMetaDataArrived(metadata: unknown): void {
-	const obj = {
-		msg: TransmuxingEvents.METADATA_ARRIVED,
-		data: metadata,
-	};
-	postWorkerMessage(obj);
-}
-
-function onScriptDataArrived(data: unknown): void {
-	const obj = {
-		msg: TransmuxingEvents.SCRIPTDATA_ARRIVED,
-		data: data,
 	};
 	postWorkerMessage(obj);
 }

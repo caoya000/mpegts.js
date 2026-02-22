@@ -8,10 +8,6 @@ enum PlayerEvents {
 	RECOVERED_EARLY_EOF = "recovered_early_eof",
 	/** Provides technical information of the media (video/audio codec, bitrate, etc.). */
 	MEDIA_INFO = "media_info",
-	/** Provides metadata from an FLV "onMetaData" marker. */
-	METADATA_ARRIVED = "metadata_arrived",
-	/** Provides scriptdata (OnCuePoint / OnTextData) from an FLV stream. */
-	SCRIPTDATA_ARRIVED = "scriptdata_arrived",
 	/** Provides Timed ID3 Metadata packets (stream_type=0x15). */
 	TIMED_ID3_METADATA_ARRIVED = "timed_id3_metadata_arrived",
 	/** Provides PGS Subtitle data (stream_type=0x90). */

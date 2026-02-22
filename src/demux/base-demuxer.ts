@@ -7,7 +7,6 @@ import type { SMPTE2038Data } from "./smpte2038";
 
 type OnErrorCallback = (type: string, info: string) => void;
 type OnMediaInfoCallback = (mediaInfo: MediaInfo) => void;
-type OnMetaDataArrivedCallback = (metadata: unknown) => void;
 type OnTrackMetadataCallback = (type: string, metadata: unknown) => void;
 type OnDataAvailableCallback = (audioTrack: unknown, videoTrack: unknown) => void;
 type OnTimedID3MetadataCallback = (timed_id3_data: PESPrivateData) => void;
@@ -22,7 +21,6 @@ type OnPESPrivateDataDescriptorCallback = (private_data_descriptor: PESPrivateDa
 export default abstract class BaseDemuxer {
 	public onError: OnErrorCallback | null = null;
 	public onMediaInfo: OnMediaInfoCallback | null = null;
-	public onMetaDataArrived: OnMetaDataArrivedCallback | null = null;
 	public onTrackMetadata: OnTrackMetadataCallback | null = null;
 	public onDataAvailable: OnDataAvailableCallback | null = null;
 	public onTimedID3Metadata: OnTimedID3MetadataCallback | null = null;
@@ -37,7 +35,6 @@ export default abstract class BaseDemuxer {
 	public destroy(): void {
 		this.onError = null;
 		this.onMediaInfo = null;
-		this.onMetaDataArrived = null;
 		this.onTrackMetadata = null;
 		this.onDataAvailable = null;
 		this.onTimedID3Metadata = null;
