@@ -1,5 +1,3 @@
-import EventEmitter from "node:events";
-
 let GLOBAL_TAG = "mpegts.js";
 let FORCE_GLOBAL_TAG = false;
 let ENABLE_ERROR = true;
@@ -7,26 +5,13 @@ let ENABLE_INFO = true;
 let ENABLE_WARN = true;
 let ENABLE_DEBUG = true;
 let ENABLE_VERBOSE = true;
-let ENABLE_CALLBACK = false;
-const emitter: EventEmitter = new EventEmitter();
 
 function e(tag: string, msg: string): void {
 	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-
 	const str = `[${tag}] > ${msg}`;
-
-	if (ENABLE_CALLBACK) {
-		emitter.emit("log", "error", str);
-	}
-
-	if (!ENABLE_ERROR) {
-		return;
-	}
-
+	if (!ENABLE_ERROR) return;
 	if (console.error) {
 		console.error(str);
-	} else if (console.warn) {
-		console.warn(str);
 	} else {
 		console.log(str);
 	}
@@ -34,17 +19,8 @@ function e(tag: string, msg: string): void {
 
 function i(tag: string, msg: string): void {
 	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-
 	const str = `[${tag}] > ${msg}`;
-
-	if (ENABLE_CALLBACK) {
-		emitter.emit("log", "info", str);
-	}
-
-	if (!ENABLE_INFO) {
-		return;
-	}
-
+	if (!ENABLE_INFO) return;
 	if (console.info) {
 		console.info(str);
 	} else {
@@ -54,17 +30,8 @@ function i(tag: string, msg: string): void {
 
 function w(tag: string, msg: string): void {
 	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-
 	const str = `[${tag}] > ${msg}`;
-
-	if (ENABLE_CALLBACK) {
-		emitter.emit("log", "warn", str);
-	}
-
-	if (!ENABLE_WARN) {
-		return;
-	}
-
+	if (!ENABLE_WARN) return;
 	if (console.warn) {
 		console.warn(str);
 	} else {
@@ -74,17 +41,8 @@ function w(tag: string, msg: string): void {
 
 function d(tag: string, msg: string): void {
 	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-
 	const str = `[${tag}] > ${msg}`;
-
-	if (ENABLE_CALLBACK) {
-		emitter.emit("log", "debug", str);
-	}
-
-	if (!ENABLE_DEBUG) {
-		return;
-	}
-
+	if (!ENABLE_DEBUG) return;
 	if (console.debug) {
 		console.debug(str);
 	} else {
@@ -94,17 +52,8 @@ function d(tag: string, msg: string): void {
 
 function v(tag: string, msg: string): void {
 	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-
 	const str = `[${tag}] > ${msg}`;
-
-	if (ENABLE_CALLBACK) {
-		emitter.emit("log", "verbose", str);
-	}
-
-	if (!ENABLE_VERBOSE) {
-		return;
-	}
-
+	if (!ENABLE_VERBOSE) return;
 	console.log(str);
 }
 
@@ -151,13 +100,8 @@ const Log = {
 	set ENABLE_VERBOSE(value: boolean) {
 		ENABLE_VERBOSE = value;
 	},
-	get ENABLE_CALLBACK(): boolean {
-		return ENABLE_CALLBACK;
-	},
-	set ENABLE_CALLBACK(value: boolean) {
-		ENABLE_CALLBACK = value;
-	},
-	emitter,
+	// Kept for compatibility with internal modules that reference Log.ENABLE_CALLBACK
+	ENABLE_CALLBACK: false,
 	e,
 	i,
 	w,

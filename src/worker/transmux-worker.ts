@@ -1,0 +1,84 @@
+import type { PlayerConfig, PlayerSegment } from "../types";
+import type { WorkerCommand, WorkerEvent } from "./messages";
+import Pipeline, { type PipelineCallbacks } from "./pipeline";
+
+let pipeline: Pipeline | null = null;
+
+function post(msg: WorkerEvent, transfer?: Transferable[]): void {
+	if (transfer) {
+		(self as unknown as { postMessage(msg: unknown, transfer: Transferable[]): void }).postMessage(msg, transfer);
+	} else {
+		(self as unknown as { postMessage(msg: unknown): void }).postMessage(msg);
+	}
+}
+
+function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeline {
+	const callbacks: PipelineCallbacks = {
+		onInitSegment(type, initSegment) {
+			const data = initSegment.data as ArrayBuffer;
+			post(
+				{
+					type: "init-segment",
+					track: type as "video" | "audio",
+					data,
+					codec: initSegment.codec ?? "",
+					container: initSegment.container,
+				},
+				[data],
+			);
+		},
+		onMediaSegment(type, mediaSegment) {
+			const data = mediaSegment.data as ArrayBuffer;
+			post({ type: "media-segment", track: type as "video" | "audio", data }, [data]);
+		},
+		onLoadingComplete() {
+			post({ type: "complete" });
+		},
+		onRecoveredEarlyEof() {
+			// silently recovered, no action needed
+		},
+		onMediaInfo(info) {
+			post({ type: "media-info", info });
+		},
+		onIOError(type, info) {
+			post({ type: "error", category: "io", detail: type, info: info.msg });
+		},
+		onDemuxError(type, info) {
+			post({ type: "error", category: "demux", detail: type, info });
+		},
+		onRecommendSeekpoint(_milliseconds) {
+			// Not needed in new architecture - seek is handled differently
+		},
+	};
+
+	return new Pipeline(segments, config, callbacks);
+}
+
+self.addEventListener("message", (e: MessageEvent) => {
+	const cmd = e.data as WorkerCommand;
+
+	switch (cmd.type) {
+		case "init":
+			pipeline = createPipeline(cmd.segments, cmd.config);
+			break;
+		case "start":
+			pipeline?.start();
+			break;
+		case "load-segments":
+			pipeline?.loadSegments(cmd.segments);
+			break;
+		case "pause":
+			pipeline?.pause();
+			break;
+		case "resume":
+			pipeline?.resume();
+			break;
+		case "destroy":
+			if (pipeline) {
+				pipeline.destroy();
+				pipeline = null;
+			}
+			(self as unknown as { postMessage(msg: unknown): void }).postMessage({ type: "destroyed" });
+			break;
+	}
+});

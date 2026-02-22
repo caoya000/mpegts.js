@@ -1,0 +1,510 @@
+import Browser from "../utils/browser";
+import Log from "../utils/logger";
+
+type Track = "video" | "audio";
+
+interface RemoveRange {
+	start: number;
+	end: number;
+}
+
+interface InitSegmentRecord {
+	data: ArrayBuffer;
+	codec: string;
+	container: string;
+}
+
+interface MSEMediaSource {
+	readyState: string;
+	duration: number;
+	streaming?: boolean;
+	handle?: unknown;
+	addSourceBuffer(mimeType: string): SourceBuffer;
+	removeSourceBuffer(sb: SourceBuffer): void;
+	endOfStream(): void;
+	addEventListener(type: string, listener: unknown): void;
+	removeEventListener(type: string, listener: unknown): void;
+}
+
+export interface MSE {
+	open(onOpen: () => void): void;
+	appendInit(track: Track, data: ArrayBuffer, codec: string, container: string): void;
+	appendMedia(track: Track, data: ArrayBuffer): void;
+	endOfStream(): void;
+	destroy(): void;
+	onBufferFull: (() => void) | null;
+	onError: ((info: { code: number; msg: string }) => void) | null;
+}
+
+const TAG = "MSE";
+
+// Auto-cleanup thresholds (seconds)
+const AUTO_CLEANUP_MAX_BACKWARD = 180;
+const AUTO_CLEANUP_MIN_BACKWARD = 120;
+
+export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }): MSE {
+	// Use ManagedMediaSource only if w3c MediaSource is not available (e.g. iOS Safari)
+	const selfRecord = self as unknown as Record<string, unknown>;
+	const useManagedMediaSource = "ManagedMediaSource" in self && !("MediaSource" in self);
+	const autoCleanup = config.isLive;
+
+	let mediaSource: MSEMediaSource | null = null;
+	let objectURL: string | null = null;
+
+	const sourceBuffers: Record<Track, SourceBuffer | null> = { video: null, audio: null };
+	const pendingSegments: Record<Track, ArrayBuffer[]> = { video: [], audio: [] };
+	const pendingRemoveRanges: Record<Track, RemoveRange[]> = { video: [], audio: [] };
+	const mimeTypes: Record<Track, string | null> = { video: null, audio: null };
+	const lastInitSegments: Record<Track, InitSegmentRecord | null> = { video: null, audio: null };
+
+	let isBufferFull = false;
+	let hasPendingEos = false;
+
+	// Deferred init segments: queued before sourceopen fires
+	let pendingSourceBufferInit: { track: Track; data: ArrayBuffer; codec: string; container: string }[] = [];
+
+	let sourceOpenCallback: (() => void) | null = null;
+
+	// Event handler references for cleanup
+	let onSourceOpenHandler: (() => void) | null = null;
+	let onSourceEndedHandler: (() => void) | null = null;
+	let onSourceCloseHandler: (() => void) | null = null;
+	let onStartStreamingHandler: (() => void) | null = null;
+	let onEndStreamingHandler: (() => void) | null = null;
+	let onQualityChangeHandler: (() => void) | null = null;
+
+	// Per-track event handler references for cleanup
+	const sbErrorHandlers: Record<Track, ((e: Event) => void) | null> = { video: null, audio: null };
+	const sbUpdateEndHandlers: Record<Track, (() => void) | null> = { video: null, audio: null };
+
+	// --- Internal helpers ---
+
+	function hasPendingSegments(): boolean {
+		return pendingSegments.video.length > 0 || pendingSegments.audio.length > 0;
+	}
+
+	function hasPendingRemoveRanges(): boolean {
+		return pendingRemoveRanges.video.length > 0 || pendingRemoveRanges.audio.length > 0;
+	}
+
+	function doRemoveRanges(): void {
+		const tracks: Track[] = ["video", "audio"];
+		for (const track of tracks) {
+			const sb = sourceBuffers[track];
+			if (!sb || sb.updating) {
+				continue;
+			}
+			const ranges = pendingRemoveRanges[track];
+			while (ranges.length > 0 && !sb.updating) {
+				const range = ranges.shift() as RemoveRange;
+				sb.remove(range.start, range.end);
+			}
+		}
+	}
+
+	function doAppendSegments(): void {
+		const tracks: Track[] = ["video", "audio"];
+		for (const track of tracks) {
+			const sb = sourceBuffers[track];
+			if (!sb || sb.updating) {
+				continue;
+			}
+			// If ManagedMediaSource and streaming is false, do not append
+			if (mediaSource?.streaming === false) {
+				continue;
+			}
+
+			if (pendingSegments[track].length > 0) {
+				const segment = pendingSegments[track].shift() as ArrayBuffer;
+
+				if (!segment || segment.byteLength === 0) {
+					// Ignore empty buffer
+					continue;
+				}
+
+				try {
+					sb.appendBuffer(segment);
+					isBufferFull = false;
+				} catch (error: unknown) {
+					pendingSegments[track].unshift(segment);
+					if ((error as DOMException).code === 22) {
+						// QuotaExceededError
+						if (!isBufferFull) {
+							mse.onBufferFull?.();
+						}
+						isBufferFull = true;
+					} else {
+						Log.e(TAG, (error as Error).message);
+						mse.onError?.({
+							code: (error as DOMException).code,
+							msg: (error as Error).message,
+						});
+					}
+				}
+			}
+		}
+	}
+
+	function needCleanupSourceBuffer(): boolean {
+		if (!autoCleanup) {
+			return false;
+		}
+		const currentTime = video.currentTime;
+		const tracks: Track[] = ["video", "audio"];
+		for (const track of tracks) {
+			const sb = sourceBuffers[track];
+			if (sb) {
+				const buffered = sb.buffered;
+				if (buffered.length >= 1) {
+					if (currentTime - buffered.start(0) >= AUTO_CLEANUP_MAX_BACKWARD) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	function doCleanupSourceBuffer(): void {
+		const currentTime = video.currentTime;
+		const tracks: Track[] = ["video", "audio"];
+		for (const track of tracks) {
+			const sb = sourceBuffers[track];
+			if (sb) {
+				const buffered = sb.buffered;
+				let doRemove = false;
+
+				for (let i = 0; i < buffered.length; i++) {
+					const start = buffered.start(i);
+					const end = buffered.end(i);
+
+					if (start <= currentTime && currentTime < end + 3) {
+						// padding 3 seconds
+						if (currentTime - start >= AUTO_CLEANUP_MAX_BACKWARD) {
+							doRemove = true;
+							const removeEnd = currentTime - AUTO_CLEANUP_MIN_BACKWARD;
+							pendingRemoveRanges[track].push({ start, end: removeEnd });
+						}
+					} else if (end < currentTime) {
+						doRemove = true;
+						pendingRemoveRanges[track].push({ start, end });
+					}
+				}
+
+				if (doRemove && !sb.updating) {
+					doRemoveRanges();
+				}
+			}
+		}
+	}
+
+	function onSourceBufferUpdateEnd(): void {
+		if (hasPendingRemoveRanges()) {
+			doRemoveRanges();
+		} else if (hasPendingSegments()) {
+			doAppendSegments();
+		} else if (hasPendingEos) {
+			mse.endOfStream();
+		}
+	}
+
+	function onSourceBufferError(e: Event): void {
+		Log.e(TAG, `SourceBuffer Error: ${e}`);
+	}
+
+	function createSourceBuffer(track: Track, codec: string, container: string): void {
+		if (!mediaSource || mediaSource.readyState !== "open") {
+			return;
+		}
+
+		let adjustedCodec = codec;
+		if (adjustedCodec === "opus" && Browser.safari) {
+			adjustedCodec = "Opus";
+		}
+
+		let mimeType = container;
+		if (adjustedCodec && adjustedCodec.length > 0) {
+			mimeType += `;codecs=${adjustedCodec}`;
+		}
+
+		if (mimeType !== mimeTypes[track]) {
+			try {
+				const sb = mediaSource.addSourceBuffer(mimeType);
+				sourceBuffers[track] = sb;
+
+				const errorHandler = (e: Event) => onSourceBufferError(e);
+				const updateEndHandler = () => onSourceBufferUpdateEnd();
+				sbErrorHandlers[track] = errorHandler;
+				sbUpdateEndHandlers[track] = updateEndHandler;
+
+				sb.addEventListener("error", errorHandler);
+				sb.addEventListener("updateend", updateEndHandler);
+			} catch (error: unknown) {
+				Log.e(TAG, (error as Error).message);
+				if ((error as DOMException).name !== "NotSupportedError") {
+					mse.onError?.({
+						code: (error as DOMException).code,
+						msg: (error as Error).message,
+					});
+					return;
+				}
+			}
+			mimeTypes[track] = mimeType;
+		}
+	}
+
+	// --- The MSE object ---
+
+	const mse: MSE = {
+		onBufferFull: null,
+		onError: null,
+
+		open(onOpen: () => void): void {
+			if (mediaSource) {
+				Log.e(TAG, "MediaSource has already been attached");
+				return;
+			}
+
+			if (useManagedMediaSource) {
+				Log.v(TAG, "Using ManagedMediaSource");
+			}
+
+			sourceOpenCallback = onOpen;
+
+			const MSEConstructor = (useManagedMediaSource ? selfRecord.ManagedMediaSource : selfRecord.MediaSource) as {
+				new (): MSEMediaSource;
+			};
+			const ms = new MSEConstructor();
+			mediaSource = ms;
+
+			onSourceOpenHandler = () => {
+				Log.v(TAG, "MediaSource onSourceOpen");
+				ms.removeEventListener("sourceopen", onSourceOpenHandler);
+
+				// Process deferred init segments
+				if (pendingSourceBufferInit.length > 0) {
+					const pendings = pendingSourceBufferInit;
+					pendingSourceBufferInit = [];
+					for (const pending of pendings) {
+						createSourceBuffer(pending.track, pending.codec, pending.container);
+						lastInitSegments[pending.track] = {
+							data: pending.data,
+							codec: pending.codec,
+							container: pending.container,
+						};
+					}
+				}
+
+				// There may be pending media segments; append them
+				if (hasPendingSegments()) {
+					doAppendSegments();
+				}
+
+				sourceOpenCallback?.();
+				sourceOpenCallback = null;
+			};
+
+			onSourceEndedHandler = () => {
+				Log.v(TAG, "MediaSource onSourceEnded");
+			};
+
+			onSourceCloseHandler = () => {
+				Log.v(TAG, "MediaSource onSourceClose");
+				if (mediaSource) {
+					mediaSource.removeEventListener("sourceopen", onSourceOpenHandler);
+					mediaSource.removeEventListener("sourceended", onSourceEndedHandler);
+					mediaSource.removeEventListener("sourceclose", onSourceCloseHandler);
+					if (useManagedMediaSource) {
+						mediaSource.removeEventListener("startstreaming", onStartStreamingHandler);
+						mediaSource.removeEventListener("endstreaming", onEndStreamingHandler);
+						mediaSource.removeEventListener("qualitychange", onQualityChangeHandler);
+					}
+				}
+			};
+
+			ms.addEventListener("sourceopen", onSourceOpenHandler);
+			ms.addEventListener("sourceended", onSourceEndedHandler);
+			ms.addEventListener("sourceclose", onSourceCloseHandler);
+
+			if (useManagedMediaSource) {
+				onStartStreamingHandler = () => {
+					Log.v(TAG, "ManagedMediaSource onStartStreaming");
+				};
+				onEndStreamingHandler = () => {
+					Log.v(TAG, "ManagedMediaSource onEndStreaming");
+				};
+				onQualityChangeHandler = () => {
+					Log.v(TAG, "ManagedMediaSource onQualityChange");
+				};
+
+				ms.addEventListener("startstreaming", onStartStreamingHandler);
+				ms.addEventListener("endstreaming", onEndStreamingHandler);
+				ms.addEventListener("qualitychange", onQualityChangeHandler);
+			}
+
+			// Attach MediaSource to video element
+			if (useManagedMediaSource) {
+				(video as unknown as Record<string, unknown>).disableRemotePlayback = true;
+				(video as unknown as Record<string, unknown>).srcObject = ms;
+			} else {
+				objectURL = URL.createObjectURL(ms as unknown as MediaSource);
+				video.src = objectURL;
+			}
+		},
+
+		appendInit(track: Track, data: ArrayBuffer, codec: string, container: string): void {
+			if (!mediaSource || mediaSource.readyState !== "open" || mediaSource.streaming === false) {
+				pendingSourceBufferInit.push({ track, data, codec, container });
+				pendingSegments[track].push(data);
+				return;
+			}
+
+			let adjustedCodec = codec;
+			if (adjustedCodec === "opus" && Browser.safari) {
+				adjustedCodec = "Opus";
+			}
+
+			const mimePreview = adjustedCodec ? `${container};codecs=${adjustedCodec}` : container;
+			Log.v(TAG, `Received Initialization Segment, mimeType: ${mimePreview}`);
+			lastInitSegments[track] = { data, codec: adjustedCodec, container };
+
+			const firstInit = !mimeTypes[track];
+			createSourceBuffer(track, adjustedCodec, container);
+
+			pendingSegments[track].push(data);
+
+			if (!firstInit) {
+				const sb = sourceBuffers[track];
+				if (sb && !sb.updating) {
+					doAppendSegments();
+				}
+			}
+
+			// Safari audio/mpeg duration workaround
+			if (Browser.safari && track === "audio" && container === "audio/mpeg") {
+				updateMediaSourceDuration();
+			}
+		},
+
+		appendMedia(track: Track, data: ArrayBuffer): void {
+			pendingSegments[track].push(data);
+
+			if (autoCleanup && needCleanupSourceBuffer()) {
+				doCleanupSourceBuffer();
+			}
+
+			const sb = sourceBuffers[track];
+			if (sb && !sb.updating && !hasPendingRemoveRanges()) {
+				doAppendSegments();
+			}
+		},
+
+		endOfStream(): void {
+			if (!mediaSource || mediaSource.readyState !== "open") {
+				if (mediaSource && mediaSource.readyState === "closed" && hasPendingSegments()) {
+					hasPendingEos = true;
+				}
+				return;
+			}
+			const sbVideo = sourceBuffers.video;
+			const sbAudio = sourceBuffers.audio;
+			if (sbVideo?.updating || sbAudio?.updating) {
+				hasPendingEos = true;
+			} else {
+				hasPendingEos = false;
+				mediaSource.endOfStream();
+			}
+		},
+
+		destroy(): void {
+			if (mediaSource) {
+				const ms = mediaSource;
+				const tracks: Track[] = ["video", "audio"];
+
+				for (const track of tracks) {
+					pendingSegments[track].splice(0, pendingSegments[track].length);
+					pendingRemoveRanges[track].splice(0, pendingRemoveRanges[track].length);
+					lastInitSegments[track] = null;
+
+					const sb = sourceBuffers[track];
+					if (sb) {
+						if (ms.readyState !== "closed") {
+							try {
+								ms.removeSourceBuffer(sb);
+							} catch (error: unknown) {
+								Log.e(TAG, (error as Error).message);
+							}
+							if (sbErrorHandlers[track]) {
+								sb.removeEventListener("error", sbErrorHandlers[track] as EventListener);
+								sbErrorHandlers[track] = null;
+							}
+							if (sbUpdateEndHandlers[track]) {
+								sb.removeEventListener("updateend", sbUpdateEndHandlers[track] as EventListener);
+								sbUpdateEndHandlers[track] = null;
+							}
+						}
+						mimeTypes[track] = null;
+						sourceBuffers[track] = null;
+					}
+				}
+
+				if (ms.readyState === "open") {
+					try {
+						ms.endOfStream();
+					} catch (error: unknown) {
+						Log.e(TAG, (error as Error).message);
+					}
+				}
+
+				ms.removeEventListener("sourceopen", onSourceOpenHandler);
+				ms.removeEventListener("sourceended", onSourceEndedHandler);
+				ms.removeEventListener("sourceclose", onSourceCloseHandler);
+				if (useManagedMediaSource) {
+					ms.removeEventListener("startstreaming", onStartStreamingHandler);
+					ms.removeEventListener("endstreaming", onEndStreamingHandler);
+					ms.removeEventListener("qualitychange", onQualityChangeHandler);
+				}
+
+				onSourceOpenHandler = null;
+				onSourceEndedHandler = null;
+				onSourceCloseHandler = null;
+				onStartStreamingHandler = null;
+				onEndStreamingHandler = null;
+				onQualityChangeHandler = null;
+
+				pendingSourceBufferInit = [];
+				isBufferFull = false;
+				hasPendingEos = false;
+				mediaSource = null;
+			}
+
+			if (objectURL) {
+				URL.revokeObjectURL(objectURL);
+				objectURL = null;
+			}
+
+			if (useManagedMediaSource) {
+				(video as unknown as Record<string, unknown>).srcObject = null;
+			} else {
+				video.removeAttribute("src");
+			}
+
+			mse.onBufferFull = null;
+			mse.onError = null;
+			sourceOpenCallback = null;
+		},
+	};
+
+	function updateMediaSourceDuration(): void {
+		if (!mediaSource || mediaSource.readyState !== "open") {
+			return;
+		}
+		const sbVideo = sourceBuffers.video;
+		const sbAudio = sourceBuffers.audio;
+		if (video.readyState === 0 || sbVideo?.updating || sbAudio?.updating) {
+			return;
+		}
+	}
+
+	return mse;
+}

@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
+// import { analyzer } from "vite-bundle-analyzer";
 import dts from "vite-plugin-dts";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
-// import { analyzer } from "vite-bundle-analyzer"
 import packageJson from "./package.json";
 
 export default defineConfig(({ mode }) => {
@@ -9,9 +8,6 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [
-			nodePolyfills({
-				include: ["events"],
-			}),
 			dts({
 				include: ["src"],
 				rollupTypes: true,
@@ -30,7 +26,7 @@ export default defineConfig(({ mode }) => {
 			sourcemap: isDev,
 			minify: !isDev,
 			lib: {
-				entry: "src/mpegts.ts",
+				entry: "src/index.ts",
 				name: "mpegts",
 				formats: ["es"],
 				fileName: () => "mpegts.esm.js",
