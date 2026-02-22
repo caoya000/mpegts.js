@@ -6,55 +6,34 @@ let ENABLE_WARN = true;
 let ENABLE_DEBUG = true;
 let ENABLE_VERBOSE = true;
 
-function e(tag: string, msg: string): void {
-	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-	const str = `[${tag}] > ${msg}`;
+function e(tag: string, ...args: unknown[]): void {
 	if (!ENABLE_ERROR) return;
-	if (console.error) {
-		console.error(str);
-	} else {
-		console.log(str);
-	}
+	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
+	(console.error || console.log)(`[${tag}] >`, ...args);
 }
 
-function i(tag: string, msg: string): void {
-	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-	const str = `[${tag}] > ${msg}`;
+function i(tag: string, ...args: unknown[]): void {
 	if (!ENABLE_INFO) return;
-	if (console.info) {
-		console.info(str);
-	} else {
-		console.log(str);
-	}
+	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
+	(console.info || console.log)(`[${tag}] >`, ...args);
 }
 
-function w(tag: string, msg: string): void {
-	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-	const str = `[${tag}] > ${msg}`;
+function w(tag: string, ...args: unknown[]): void {
 	if (!ENABLE_WARN) return;
-	if (console.warn) {
-		console.warn(str);
-	} else {
-		console.log(str);
-	}
+	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
+	(console.warn || console.log)(`[${tag}] >`, ...args);
 }
 
-function d(tag: string, msg: string): void {
-	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-	const str = `[${tag}] > ${msg}`;
+function d(tag: string, ...args: unknown[]): void {
 	if (!ENABLE_DEBUG) return;
-	if (console.debug) {
-		console.debug(str);
-	} else {
-		console.log(str);
-	}
+	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
+	(console.debug || console.log)(`[${tag}] >`, ...args);
 }
 
-function v(tag: string, msg: string): void {
-	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
-	const str = `[${tag}] > ${msg}`;
+function v(tag: string, ...args: unknown[]): void {
 	if (!ENABLE_VERBOSE) return;
-	console.log(str);
+	if (!tag || FORCE_GLOBAL_TAG) tag = GLOBAL_TAG;
+	console.log(`[${tag}] >`, ...args);
 }
 
 const Log = {

@@ -26,10 +26,13 @@ export function createMpegtsPlayer(
 	let pendingSegments: PlayerSegment[] | null = null;
 	let destroyLiveSync: (() => void) | null = null;
 	let destroyStallJumper: (() => void) | null = null;
+	let mseGeneration = 0;
 
 	function handleWorkerMessage(e: MessageEvent): void {
 		const msg = e.data as WorkerEvent | { type: "destroyed" };
 		if (msg.type === "destroyed") return;
+		// Discard stale messages from a previous load generation
+		if (msg.gen !== mseGeneration) return;
 		switch (msg.type) {
 			case "init-segment":
 				mse?.appendInit(msg.track, msg.data, msg.codec, msg.container);
@@ -64,13 +67,13 @@ export function createMpegtsPlayer(
 	function loadInWorker(segments: PlayerSegment[]): void {
 		const w = ensureWorker();
 		if (!workerInitialized) {
-			const initCmd: WorkerCommand = { type: "init", segments, config };
+			const initCmd: WorkerCommand = { type: "init", segments, config, gen: mseGeneration };
 			w.postMessage(initCmd);
 			const startCmd: WorkerCommand = { type: "start" };
 			w.postMessage(startCmd);
 			workerInitialized = true;
 		} else {
-			const cmd: WorkerCommand = { type: "load-segments", segments };
+			const cmd: WorkerCommand = { type: "load-segments", segments, gen: mseGeneration };
 			w.postMessage(cmd);
 		}
 	}
@@ -113,6 +116,7 @@ export function createMpegtsPlayer(
 		onError: null,
 
 		loadSegments(segments: PlayerSegment[]) {
+			mseGeneration++;
 			if (mse) {
 				mse.destroy();
 				mse = null;

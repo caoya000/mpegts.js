@@ -3,6 +3,7 @@ import type { WorkerCommand, WorkerEvent } from "./messages";
 import Pipeline, { type PipelineCallbacks } from "./pipeline";
 
 let pipeline: Pipeline | null = null;
+let gen = 0;
 
 function post(msg: WorkerEvent, transfer?: Transferable[]): void {
 	if (transfer) {
@@ -23,28 +24,29 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 					data,
 					codec: initSegment.codec ?? "",
 					container: initSegment.container,
+					gen,
 				},
 				[data],
 			);
 		},
 		onMediaSegment(type, mediaSegment) {
 			const data = mediaSegment.data as ArrayBuffer;
-			post({ type: "media-segment", track: type as "video" | "audio", data }, [data]);
+			post({ type: "media-segment", track: type as "video" | "audio", data, gen }, [data]);
 		},
 		onLoadingComplete() {
-			post({ type: "complete" });
+			post({ type: "complete", gen });
 		},
 		onRecoveredEarlyEof() {
 			// silently recovered, no action needed
 		},
 		onMediaInfo(info) {
-			post({ type: "media-info", info });
+			post({ type: "media-info", info, gen });
 		},
 		onIOError(type, info) {
-			post({ type: "error", category: "io", detail: type, info: info.msg });
+			post({ type: "error", category: "io", detail: type, info: info.msg, gen });
 		},
 		onDemuxError(type, info) {
-			post({ type: "error", category: "demux", detail: type, info });
+			post({ type: "error", category: "demux", detail: type, info, gen });
 		},
 		onRecommendSeekpoint(_milliseconds) {
 			// Not needed in new architecture - seek is handled differently
@@ -59,12 +61,14 @@ self.addEventListener("message", (e: MessageEvent) => {
 
 	switch (cmd.type) {
 		case "init":
+			gen = cmd.gen;
 			pipeline = createPipeline(cmd.segments, cmd.config);
 			break;
 		case "start":
 			pipeline?.start();
 			break;
 		case "load-segments":
+			gen = cmd.gen;
 			pipeline?.loadSegments(cmd.segments);
 			break;
 		case "pause":

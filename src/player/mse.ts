@@ -209,7 +209,7 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 	}
 
 	function onSourceBufferError(e: Event): void {
-		Log.e(TAG, `SourceBuffer Error: ${e}`);
+		Log.e(TAG, `SourceBuffer Error:`, e);
 	}
 
 	function createSourceBuffer(track: Track, codec: string, container: string): void {
