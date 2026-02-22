@@ -9,7 +9,7 @@ import Log from "../utils/logger";
 import MediaInfo from "./media-info";
 import TransmuxingEvents from "./transmuxing-events";
 
-interface MediaDataSourceSegment {
+export interface MediaDataSourceSegment {
 	duration?: number;
 	filesize?: number;
 	url?: string;
@@ -20,7 +20,8 @@ interface MediaDataSourceSegment {
 	redirectedURL?: string;
 }
 
-interface MediaDataSource {
+export interface MediaDataSource {
+	type: "mse" | "mpegts" | "m2ts";
 	duration?: number;
 	filesize?: number;
 	url?: string;
@@ -35,7 +36,7 @@ class TransmuxingController {
 	TAG: string;
 	_emitter: EventEmitter;
 
-	_config: MediaConfig & Record<string, unknown>;
+	_config: MediaConfig;
 
 	_mediaDataSource: MediaDataSource | null;
 	_currentSegmentIndex: number;
@@ -50,7 +51,7 @@ class TransmuxingController {
 
 	_statisticsReporter: number | ReturnType<typeof setInterval> | null;
 
-	constructor(mediaDataSource: MediaDataSource, config: MediaConfig & Record<string, unknown>) {
+	constructor(mediaDataSource: MediaDataSource, config: MediaConfig) {
 		this.TAG = "TransmuxingController";
 		this._emitter = new EventEmitter();
 
@@ -87,8 +88,8 @@ class TransmuxingController {
 			segment.cors = mediaDataSource.cors;
 			segment.withCredentials = mediaDataSource.withCredentials;
 			// referrer policy control, if exist
-			if ((config as Record<string, unknown>).referrerPolicy) {
-				segment.referrerPolicy = (config as Record<string, unknown>).referrerPolicy as string;
+			if (config.referrerPolicy) {
+				segment.referrerPolicy = config.referrerPolicy;
 			}
 		});
 
@@ -277,27 +278,23 @@ class TransmuxingController {
 			// byteStart == 0, Initial data, probe it first
 			let probeData: unknown = null;
 
-			// Non-FLV, try MPEG-TS probe
 			probeData = TSDemuxer.probe(data);
 			if ((probeData as Record<string, unknown>).match) {
-				// Hit as MPEG-TS
 				this._setupTSDemuxerRemuxer(probeData);
 				consumed = (this._demuxer as TSDemuxer).parseChunks(data, byteStart);
 			}
 
 			if (!(probeData as Record<string, unknown>).match && !(probeData as Record<string, unknown>).needMoreData) {
-				// Both probing as FLV / MPEG-TS failed, report error
 				probeData = null;
-				Log.e(this.TAG, "Non MPEG-TS/FLV, Unsupported media type!");
+				Log.e(this.TAG, "Non MPEG-TS, Unsupported media type!");
 				Promise.resolve().then(() => {
 					this._internalAbort();
 				});
 				this._emitter.emit(
 					TransmuxingEvents.DEMUX_ERROR,
 					DemuxErrors.FORMAT_UNSUPPORTED,
-					"Non MPEG-TS/FLV, Unsupported media type!",
+					"Non MPEG-TS, Unsupported media type!",
 				);
-				// Leave consumed as 0
 			}
 		}
 
@@ -314,7 +311,6 @@ class TransmuxingController {
 
 		demuxer.onError = this._onDemuxException.bind(this);
 		demuxer.onMediaInfo = this._onMediaInfo.bind(this);
-		demuxer.onMetaDataArrived = this._onMetaDataArrived.bind(this);
 		demuxer.onTimedID3Metadata = this._onTimedID3Metadata.bind(this) as unknown as typeof demuxer.onTimedID3Metadata;
 		demuxer.onPGSSubtitleData = this._onPGSSubtitle.bind(this) as unknown as typeof demuxer.onPGSSubtitleData;
 		demuxer.onSynchronousKLVMetadata = this._onSynchronousKLVMetadata.bind(
@@ -366,14 +362,6 @@ class TransmuxingController {
 				this.seek(target);
 			});
 		}
-	}
-
-	_onMetaDataArrived(metadata: unknown): void {
-		this._emitter.emit(TransmuxingEvents.METADATA_ARRIVED, metadata);
-	}
-
-	_onScriptDataArrived(data: unknown): void {
-		this._emitter.emit(TransmuxingEvents.SCRIPTDATA_ARRIVED, data);
 	}
 
 	_onTimedID3Metadata(timed_id3_metadata: Record<string, unknown>): void {

@@ -1,41 +1,17 @@
+import type { MediaConfig } from "../config";
 import type MediaInfo from "../core/media-info";
-// import PlayerEngineDedicatedThread from "./player-engine-dedicated-thread";
-import { InvalidArgumentException } from "../utils/exception";
-import Log from "../utils/logger";
+import type { MediaDataSource } from "../core/transmuxing-controller";
 import type PlayerEngine from "./player-engine";
 import PlayerEngineMainThread from "./player-engine-main-thread";
 
 class MSEPlayer {
-	private readonly TAG: string = "MSEPlayer";
-
 	private _type: string = "MSEPlayer";
 
 	private _media_element: HTMLMediaElement | null = null;
 	private _player_engine: PlayerEngine | null = null;
 
-	public constructor(mediaDataSource: Record<string, unknown>, config?: Record<string, unknown>) {
-		const typeLowerCase: string = (mediaDataSource.type as string).toLowerCase();
-		if (typeLowerCase !== "mse" && typeLowerCase !== "mpegts" && typeLowerCase !== "m2ts" && typeLowerCase !== "flv") {
-			throw new InvalidArgumentException("MSEPlayer requires an mpegts/m2ts/flv MediaDataSource input!");
-		}
-
-		if (
-			(config as Record<string, unknown> | undefined)?.enableWorkerForMSE
-			// && PlayerEngineDedicatedThread.isSupported()
-		) {
-			try {
-				throw new Error("PlayerEngineDedicatedThread is explicitly disabled");
-				// this._player_engine = new PlayerEngineDedicatedThread(
-				//   mediaDataSource,
-				//   config,
-				// );
-			} catch (_error) {
-				Log.e(this.TAG, "Error while initializing PlayerEngineDedicatedThread, fallback to PlayerEngineMainThread");
-				this._player_engine = new PlayerEngineMainThread(mediaDataSource, config);
-			}
-		} else {
-			this._player_engine = new PlayerEngineMainThread(mediaDataSource, config);
-		}
+	public constructor(mediaDataSource: MediaDataSource, config?: Partial<MediaConfig>) {
+		this._player_engine = new PlayerEngineMainThread(mediaDataSource, config);
 	}
 
 	public destroy(): void {

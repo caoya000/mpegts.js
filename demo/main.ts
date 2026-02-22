@@ -1,4 +1,11 @@
-import { createPlayer, isSupported, LoggingControl, type MSEPlayer, version } from "../src/mpegts";
+import {
+	createPlayer,
+	isSupported,
+	LoggingControl,
+	type MediaDataSource,
+	type MSEPlayer,
+	version,
+} from "../src/mpegts";
 
 const checkBoxFields = ["isLive", "withCredentials", "liveBufferLatencyChasing"];
 let player: MSEPlayer | null = null;
@@ -66,7 +73,7 @@ function switchToMds(): void {
 	saveSettings();
 }
 
-function playerLoadMds(mediaDataSource: Record<string, unknown>): void {
+function playerLoadMds(mediaDataSource: MediaDataSource): void {
 	const element = document.getElementsByName("videoElement")[0] as HTMLVideoElement;
 	if (player != null) {
 		player.unload();
@@ -75,7 +82,6 @@ function playerLoadMds(mediaDataSource: Record<string, unknown>): void {
 		player = null;
 	}
 	player = createPlayer(mediaDataSource, {
-		enableWorker: true,
 		lazyLoadMaxDuration: 3 * 60,
 		seekType: "range",
 		liveBufferLatencyChasing: $input("liveBufferLatencyChasing").checked,
@@ -91,16 +97,17 @@ function playerLoad(): void {
 		const xhr = new XMLHttpRequest();
 		xhr.open("GET", url, true);
 		xhr.onload = () => {
-			const mediaDataSource = JSON.parse(xhr.response) as Record<string, unknown>;
+			const mediaDataSource = JSON.parse(xhr.response) as MediaDataSource;
 			playerLoadMds(mediaDataSource);
 		};
 		xhr.send();
 	} else {
-		const mediaDataSource: Record<string, unknown> = { type: "mse" };
-		for (const field of checkBoxFields) {
-			mediaDataSource[field] = $input(field).checked;
-		}
-		mediaDataSource.url = $input("sURL").value;
+		const mediaDataSource: MediaDataSource = {
+			type: "mse",
+			isLive: $input("isLive").checked,
+			withCredentials: $input("withCredentials").checked,
+			url: $input("sURL").value,
+		};
 		console.log("MediaDataSource", mediaDataSource);
 		playerLoadMds(mediaDataSource);
 	}

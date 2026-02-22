@@ -1,4 +1,12 @@
-import { createPlayer, Events, getFeatureList, LoggingControl, type MSEPlayer, version } from "../src/mpegts";
+import {
+	createPlayer,
+	Events,
+	getFeatureList,
+	LoggingControl,
+	type MediaDataSource,
+	type MSEPlayer,
+	version,
+} from "../src/mpegts";
 
 // aribb24.js is loaded via CDN script tag
 declare const aribb24js: {
@@ -124,7 +132,7 @@ interface TimedID3Data {
 	data: Uint8Array;
 }
 
-function playerLoadMds(mediaDataSource: Record<string, unknown>): void {
+function playerLoadMds(mediaDataSource: MediaDataSource): void {
 	const element = document.getElementsByName("videoElement")[0] as HTMLVideoElement;
 	if (player) {
 		player.unload();
@@ -142,8 +150,6 @@ function playerLoadMds(mediaDataSource: Record<string, unknown>): void {
 	}
 
 	player = createPlayer(mediaDataSource, {
-		enableWorker: true,
-		enableWorkerForMSE: true,
 		liveSync: $input("liveSync").checked,
 	});
 	player.attachMediaElement(element);
@@ -201,16 +207,17 @@ function playerLoad(): void {
 		const xhr = new XMLHttpRequest();
 		xhr.open("GET", url, true);
 		xhr.onload = () => {
-			const mediaDataSource = JSON.parse(xhr.response) as Record<string, unknown>;
+			const mediaDataSource = JSON.parse(xhr.response) as MediaDataSource;
 			playerLoadMds(mediaDataSource);
 		};
 		xhr.send();
 	} else {
-		const mediaDataSource: Record<string, unknown> = { type: "mse" };
-		for (const field of checkBoxFields) {
-			mediaDataSource[field] = $input(field).checked;
-		}
-		mediaDataSource.url = $input("sURL").value;
+		const mediaDataSource: MediaDataSource = {
+			type: "mse",
+			isLive: $input("isLive").checked,
+			withCredentials: $input("withCredentials").checked,
+			url: $input("sURL").value,
+		};
 		console.log("MediaDataSource", mediaDataSource);
 		playerLoadMds(mediaDataSource);
 	}

@@ -1,9 +1,5 @@
 /** Player configuration options. All fields are optional when passed to `createPlayer()`. */
 export interface MediaConfig {
-	/** Enable separated thread (DedicatedWorker) for transmuxing. @default false */
-	enableWorker: boolean;
-	/** Enable separated thread (DedicatedWorker) for MediaSource. @default false */
-	enableWorkerForMSE: boolean;
 	/** Enable IO stash buffer. Set to false for realtime (minimal latency) live stream playback, but may stall on network jitter. @default true */
 	enableStashBuffer: boolean;
 	/** IO stash buffer initial size in bytes. A suitable size can improve video load/seek time. @default 384KB */
@@ -39,6 +35,8 @@ export interface MediaConfig {
 	/** Defer loading until MediaSource `sourceopen` event. On Chrome, background tabs may not trigger `sourceopen` until activated. @default true */
 	deferLoadAfterSourceOpen: boolean;
 
+	/** Enable auto cleanup of SourceBuffer when backward buffer exceeds `autoCleanupMaxBackwardDuration`. @default false */
+	autoCleanupSourceBuffer: boolean;
 	/** When backward buffer exceeds this value (seconds), auto cleanup SourceBuffer. @default 180 */
 	autoCleanupMaxBackwardDuration: number;
 	/** Seconds to reserve for backward buffer during auto cleanup. @default 120 */
@@ -65,6 +63,8 @@ export interface MediaConfig {
 	/** Reuse 301/302 redirected URL for subsequent requests (seek, reconnect, etc.). @default false */
 	reuseRedirectedURL: boolean;
 
+	/** Referrer policy for HTTP requests. Applied to each segment's `referrerPolicy` field. */
+	referrerPolicy: string | undefined;
 	/** Additional headers to add to HTTP requests. */
 	headers: Record<string, string> | undefined;
 	/** Custom loader. Should implement the `BaseLoader` interface. */
@@ -72,8 +72,6 @@ export interface MediaConfig {
 }
 
 export const defaultConfig: MediaConfig = {
-	enableWorker: false,
-	enableWorkerForMSE: false,
 	enableStashBuffer: true,
 	stashInitialSize: undefined,
 
@@ -94,6 +92,7 @@ export const defaultConfig: MediaConfig = {
 	lazyLoadRecoverDuration: 30,
 	deferLoadAfterSourceOpen: true,
 
+	autoCleanupSourceBuffer: false,
 	autoCleanupMaxBackwardDuration: 3 * 60,
 	autoCleanupMinBackwardDuration: 2 * 60,
 
@@ -109,6 +108,7 @@ export const defaultConfig: MediaConfig = {
 	customSeekHandler: undefined,
 	reuseRedirectedURL: false,
 
+	referrerPolicy: undefined,
 	headers: undefined,
 	customLoader: undefined,
 };

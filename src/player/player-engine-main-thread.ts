@@ -5,6 +5,7 @@ import type MediaInfo from "../core/media-info";
 import MSEController from "../core/mse-controller";
 import MSEEvents from "../core/mse-events";
 import Transmuxer from "../core/transmuxer";
+import type { MediaDataSource } from "../core/transmuxing-controller";
 import TransmuxingEvents from "../core/transmuxing-events";
 import { IllegalStateException } from "../utils/exception";
 import Log from "../utils/logger";
@@ -25,8 +26,8 @@ class PlayerEngineMainThread implements PlayerEngine {
 	private readonly TAG: string = "PlayerEngineMainThread";
 
 	private _emitter: EventEmitter | null = new EventEmitter();
-	private _media_data_source: Record<string, unknown> | null;
-	private _config: MediaConfig & Record<string, unknown>;
+	private _media_data_source: MediaDataSource | null;
+	private _config: MediaConfig;
 
 	private _media_element: HTMLMediaElement | null = null;
 
@@ -50,9 +51,9 @@ class PlayerEngineMainThread implements PlayerEngine {
 
 	private e: MainThreadEventHandlers | null = null;
 
-	public constructor(mediaDataSource: Record<string, unknown>, config?: Record<string, unknown>) {
+	public constructor(mediaDataSource: MediaDataSource, config?: Partial<MediaConfig>) {
 		this._media_data_source = mediaDataSource;
-		this._config = createDefaultConfig() as MediaConfig & Record<string, unknown>;
+		this._config = createDefaultConfig();
 
 		if (typeof config === "object") {
 			Object.assign(this._config, config);
@@ -170,6 +171,10 @@ class PlayerEngineMainThread implements PlayerEngine {
 			return;
 		}
 
+		if (!this._media_data_source) {
+			throw new IllegalStateException("MediaDataSource is not available!");
+		}
+
 		this._transmuxer = new Transmuxer(this._media_data_source, this._config);
 
 		this._transmuxer.on(TransmuxingEvents.INIT_SEGMENT, ((_type: unknown, is: unknown) => {
@@ -218,12 +223,6 @@ class PlayerEngineMainThread implements PlayerEngine {
 			if (this._media_element && !this._config.accurateSeek) {
 				this._seeking_handler?.directSeek((milliseconds as number) / 1000);
 			}
-		});
-		this._transmuxer.on(TransmuxingEvents.METADATA_ARRIVED, (metadata: unknown) => {
-			this._emitter?.emit(PlayerEvents.METADATA_ARRIVED, metadata);
-		});
-		this._transmuxer.on(TransmuxingEvents.SCRIPTDATA_ARRIVED, (data: unknown) => {
-			this._emitter?.emit(PlayerEvents.SCRIPTDATA_ARRIVED, data);
 		});
 		this._transmuxer.on(TransmuxingEvents.TIMED_ID3_METADATA_ARRIVED, (timed_id3_metadata: unknown) => {
 			this._emitter?.emit(PlayerEvents.TIMED_ID3_METADATA_ARRIVED, timed_id3_metadata);

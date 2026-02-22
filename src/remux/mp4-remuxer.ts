@@ -8,7 +8,6 @@ import MP4 from "./mp4-generator";
 interface RemuxerConfig {
 	isLive?: boolean;
 	fixAudioTimestampGap?: boolean;
-	[key: string]: unknown;
 }
 
 interface AudioSample {

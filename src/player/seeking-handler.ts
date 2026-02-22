@@ -1,8 +1,9 @@
+import type { MediaConfig } from "../config";
 import { IDRSampleList, type SampleInfo } from "../core/media-segment-info";
 import Browser from "../utils/browser";
 
 class SeekingHandler {
-	private _config: Record<string, unknown> = {};
+	private _config: MediaConfig;
 	private _media_element: HTMLMediaElement | null = null;
 	private _always_seek_keyframe: boolean = false;
 	private _on_unbuffered_seek: ((milliseconds: number) => void) | null = null;
@@ -14,7 +15,7 @@ class SeekingHandler {
 	private e: { onMediaSeeking: (e: Event) => void } | null = null;
 
 	public constructor(
-		config: Record<string, unknown>,
+		config: MediaConfig,
 		media_element: HTMLMediaElement,
 		on_unbuffered_seek: (milliseconds: number) => void,
 	) {

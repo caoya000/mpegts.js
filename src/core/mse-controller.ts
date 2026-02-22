@@ -90,7 +90,7 @@ interface MSEMediaSource {
 class MSEController {
 	TAG: string;
 
-	_config: MediaConfig & Record<string, unknown>;
+	_config: MediaConfig;
 	_emitter: EventEmitter;
 
 	e: EventHandlers | null;
@@ -115,7 +115,7 @@ class MSEController {
 	_pendingSegments: PendingSegmentsMap;
 	_pendingRemoveRanges: PendingRemoveRangesMap;
 
-	constructor(config: MediaConfig & Record<string, unknown>) {
+	constructor(config: MediaConfig) {
 		this.TAG = "MSEController";
 
 		this._config = config;
