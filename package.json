@@ -24,11 +24,13 @@
 		".": {
 			"import": "./dist/mpegts.esm.js",
 			"types": "./dist/mpegts.d.ts"
-		}
+		},
+		"./wasm/mp2_decoder.wasm": "./wasm/minimp3/mp2_decoder.wasm"
 	},
 	"files": [
 		"dist",
-		"src"
+		"src",
+		"wasm/minimp3/mp2_decoder.wasm"
 	],
 	"scripts": {
 		"build": "vite build --mode=production",
