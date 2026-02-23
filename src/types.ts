@@ -12,6 +12,8 @@ export interface PlayerError {
 export interface PlayerEventMap {
 	error: (error: PlayerError) => void;
 	"seek-needed": (seconds: number) => void;
+	/** Fired when audio playback is blocked by autoplay policy and requires user interaction. */
+	"audio-suspended": () => void;
 }
 
 export interface Player {
@@ -27,6 +29,7 @@ export interface Player {
 export interface PlayerImpl {
 	onError: ((error: PlayerError) => void) | null;
 	onHLSDetected?: (() => void) | null;
+	onAudioSuspended?: (() => void) | null;
 	loadSegments(segments: PlayerSegment[]): void;
 	seek(seconds: number): void;
 	setLiveSync(enabled: boolean): void;

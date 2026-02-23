@@ -37,6 +37,7 @@ export function createMpegtsPlayer(
 	function ensurePCMPlayer(): PCMAudioPlayer {
 		if (!pcmPlayer) {
 			pcmPlayer = new PCMAudioPlayer(config);
+			pcmPlayer.onSuspended = () => impl.onAudioSuspended?.();
 			pcmPlayerInitPromise = pcmPlayer.init();
 			pcmPlayer.attachVideo(video);
 		}
@@ -154,10 +155,7 @@ export function createMpegtsPlayer(
 				mse.destroy();
 				mse = null;
 			}
-			// Reset PCM player on new load (flush, not stop — preserve pause state)
-			if (pcmPlayer) {
-				pcmPlayer.flush();
-			}
+			destroyPCMPlayer();
 			initMSE();
 			initLiveHelpers();
 			pendingSegments = segments;

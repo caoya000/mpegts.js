@@ -66,6 +66,10 @@ export class PCMAudioPlayer {
 	private boundOnVolumeChange: (() => void) | null = null;
 	private boundOnTimeUpdate: (() => void) | null = null;
 
+	/** Called when AudioContext is blocked by autoplay policy (needs user interaction). */
+	onSuspended: (() => void) | null = null;
+	private suspendedNotified: boolean = false;
+
 	constructor(config: PlayerConfig) {
 		this.config = config;
 	}
@@ -114,11 +118,9 @@ export class PCMAudioPlayer {
 		};
 
 		if (this.context.state === "suspended") {
-			try {
-				await this.context.resume();
-			} catch (_e) {
-				Log.w(TAG, "Failed to resume AudioContext, will retry on user interaction");
-			}
+			// Don't await — in some browsers resume() stays pending until
+			// user interaction, which would block init() indefinitely.
+			this.context.resume().catch(() => {});
 		}
 
 		Log.v(TAG, `AudioContext initialized, sampleRate: ${this.context.sampleRate}, state: ${this.context.state}`);
@@ -238,6 +240,11 @@ export class PCMAudioPlayer {
 
 		if (this.context.state === "suspended") {
 			this.context.resume().catch(() => {});
+			if (!this.suspendedNotified) {
+				this.suspendedNotified = true;
+				Log.w(TAG, "AudioContext blocked by autoplay policy, waiting for user interaction");
+				this.onSuspended?.();
+			}
 			return;
 		}
 

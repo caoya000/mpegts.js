@@ -20,16 +20,22 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 
 	const errorHandlers = new Set<(e: PlayerError) => void>();
 	const seekHandlers = new Set<(s: number) => void>();
+	const audioSuspendedHandlers = new Set<() => void>();
 
 	// Cached impls — created on demand, kept alive across type switches
 	const cache: Record<string, PlayerImpl> = {};
 	let activeType: string | null = null;
 	let lastSegments: PlayerSegment[] = [];
 
-	function setErrorHandler(impl: PlayerImpl): void {
+	function setHandlers(impl: PlayerImpl): void {
 		impl.onError = (e) => {
 			for (const h of errorHandlers) {
 				h(e);
+			}
+		};
+		impl.onAudioSuspended = () => {
+			for (const h of audioSuspendedHandlers) {
+				h();
 			}
 		};
 	}
@@ -40,7 +46,7 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 				type === "hls"
 					? createHlsPlayer(video, fullConfig, seekHandlers)
 					: createMpegtsPlayer(video, fullConfig, seekHandlers);
-			setErrorHandler(impl);
+			setHandlers(impl);
 			cache[type] = impl;
 		}
 		return cache[type];
@@ -98,11 +104,13 @@ export function createPlayer(video: HTMLVideoElement, config?: Partial<PlayerCon
 		on<K extends keyof PlayerEventMap>(event: K, handler: PlayerEventMap[K]) {
 			if (event === "error") errorHandlers.add(handler as (e: PlayerError) => void);
 			if (event === "seek-needed") seekHandlers.add(handler as (s: number) => void);
+			if (event === "audio-suspended") audioSuspendedHandlers.add(handler as () => void);
 		},
 
 		off<K extends keyof PlayerEventMap>(event: K, handler: PlayerEventMap[K]) {
 			if (event === "error") errorHandlers.delete(handler as (e: PlayerError) => void);
 			if (event === "seek-needed") seekHandlers.delete(handler as (s: number) => void);
+			if (event === "audio-suspended") audioSuspendedHandlers.delete(handler as () => void);
 		},
 	};
 }
