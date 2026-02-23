@@ -58,7 +58,6 @@ export class PCMAudioPlayer {
 	// Seek state
 	private isSeeking: boolean = false;
 
-
 	// Bound event handlers for cleanup
 	private boundOnVideoSeeking: (() => void) | null = null;
 	private boundOnVideoSeeked: (() => void) | null = null;

@@ -1,6 +1,6 @@
 {
 	"name": "@rtp2httpd/mpegts.js",
-	"version": "3.0.0",
+	"version": "3.1.0",
 	"type": "module",
 	"description": "HTML5 MPEG2-TS Stream Player (rtp2httpd fork)",
 	"author": "Stackie Jia <jsq2627@gmail.com>",

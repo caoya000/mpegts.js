@@ -6,32 +6,52 @@ This is a fork of [mpegts.js](https://github.com/xqq/mpegts.js) tailored for [rt
 
 ## Changes from upstream
 
+### Full TypeScript rewrite
+
+All source code has been migrated from JavaScript to TypeScript with strict type checking. Type declarations are auto-generated via `vite-plugin-dts`.
+
+### MP2 software decoding
+
+Added MP2 (MPEG Audio Layer 2) software decoding pipeline for broadcast streams (e.g. DVB, ISDB) that use MP2 audio — which browsers do not natively support via MSE.
+
+- **minimp3 WASM decoder**: Custom Emscripten build of [minimp3](https://github.com/lieff/minimp3) (CC0 license), ~18KB binary with Layer 3 stripped
+- **Web Worker decoding**: MP2 frames are decoded in a Web Worker to avoid blocking the main thread
+- **PCMAudioPlayer**: Web Audio API based player with drift-based A/V sync, seek support, discontinuity handling, and iOS Silent Mode bypass
+- Configuration: set `config.wasmDecoders.mp2` to the URL of `mp2_decoder.wasm`
+
+### HLS support
+
+- Auto-detects HLS streams via Content-Type header inspection (M3U8)
+- Sequential multi-segment playback with seamless segment switching
+- Unified `createPlayer()` API handles both MPEG-TS (MSE) and HLS (native) transparently
+
+### Build & tooling modernization
+
 - **Build system**: Migrated from webpack to Vite
-- **Removed FLV support**: FLV demuxer / `NativePlayer` removed (MPEG-TS only)
-- **Removed legacy IO loaders**: `MozChunkedLoader`, `MSStreamLoader`, `RangeLoader`, `WebSocketLoader` removed — only `FetchStreamLoader` is kept
-- **Removed AV1 over MPEG-TS support**
-- **Code formatting**: Reformatted with Prettier, cleaned up polyfills
+- **Linting**: Migrated from Prettier to Biome
 - **Package manager**: Migrated from npm to pnpm
+- **ESM-first**: `type: "module"` in package.json, named exports instead of namespace
+- **Worker inline embedding**: Transmux worker embedded as inline blob, no separate file needed
+
+### Simplified API
+
+- Single-instance player lifecycle with cached mpegts/HLS implementations
+- `PlayerConfig` unified (removed separate `MediaConfig` and `isLive` flag)
+- Multi-segment playback via `player.loadSegments()`
+- Configurable live latency chasing (`liveSync`, `liveSyncTargetLatency`, etc.)
+
+### Removed features (for smaller bundle size)
+
+- FLV demuxer and `NativePlayer`
+- AV1 over MPEG-TS
+- Legacy IO loaders (`MozChunkedLoader`, `MSStreamLoader`, `RangeLoader`, `WebSocketLoader`) — only `FetchStreamLoader` is kept
+- Dead code: unused seek chain, VOD reconnection, stash buffer, speed sampler
 
 ## Overview
 
-mpegts.js works by transmuxing MPEG2-TS stream into ISO BMFF (Fragmented MP4) segments, followed by feeding mp4 segments into an HTML5 `<video>` element through [Media Source Extensions][] API.
+mpegts.js works by transmuxing MPEG2-TS stream into ISO BMFF (Fragmented MP4) segments, followed by feeding mp4 segments into an HTML5 `<video>` element through [Media Source Extensions][] API. For MP2 audio, frames are diverted to a WASM software decoder and played back via Web Audio API.
 
 [Media Source Extensions]: https://w3c.github.io/media-source/
-
-## Features
-
-- Playback for MPEG2-TS stream with H.264/H.265 + AAC codec transported in http(s)
-- Extremely low latency of less than 1 second in the best case
-- Playback for `.m2ts` file like BDAV/BDMV with 192 bytes TS packet, or 204 bytes TS packet
-- Support handling dynamic codec parameters change (e.g. video resolution change)
-- Support Chrome, Firefox, Safari, Edge or any Chromium-based browsers
-- Support chasing latency automatically for internal buffer of HTMLMediaElement
-- Low CPU overhead and low memory usage
-- Support extracting PES private data (stream_type=0x06) like ARIB B24 subtitles (with [aribb24.js][])
-- Support Timed ID3 Metadata (stream_type=0x15) callback (TIMED_ID3_METADATA_ARRIVED)
-
-[aribb24.js]: https://github.com/monyone/aribb24.js
 
 ## Installation
 
@@ -48,22 +68,24 @@ pnpm build
 
 ## Getting Started
 
-```html
-<script src="mpegts.js"></script>
-<video id="videoElement"></video>
-<script>
-  if (mpegts.getFeatureList().mseLivePlayback) {
-    var videoElement = document.getElementById("videoElement");
-    var player = mpegts.createPlayer({
-      type: "mse", // could also be mpegts, m2ts
-      isLive: true,
-      url: "http://example.com/live/livestream.ts",
-    });
-    player.attachMediaElement(videoElement);
-    player.load();
-    player.play();
-  }
-</script>
+```js
+import { createPlayer, isSupported } from "@rtp2httpd/mpegts.js";
+
+if (isSupported()) {
+  const video = document.getElementById("videoElement");
+  const player = createPlayer(video, {
+    // Optional: enable MP2 software decoding
+    // wasmDecoders: { mp2: "/path/to/mp2_decoder.wasm" },
+  });
+
+  player.loadSegments([
+    { url: "http://example.com/live/livestream.ts" },
+  ]);
+
+  player.on("error", (e) => console.error(e));
+
+  video.play();
+}
 ```
 
 ## License
