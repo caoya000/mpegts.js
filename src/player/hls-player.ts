@@ -1,4 +1,5 @@
-import type { PlayerConfig, PlayerImpl, PlayerSegment } from "../types";
+import type { PlayerConfig } from "../config";
+import type { PlayerImpl, PlayerSegment } from "../types";
 import { isBuffered } from "./mpegts-player";
 
 export function createHlsPlayer(

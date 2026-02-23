@@ -3,22 +3,6 @@ export interface PlayerSegment {
 	duration?: number;
 }
 
-export interface PlayerConfig {
-	isLive: boolean;
-	liveSync: boolean;
-	liveSyncMaxLatency: number;
-	liveSyncTargetLatency: number;
-	liveSyncPlaybackRate: number;
-}
-
-export const defaultPlayerConfig: PlayerConfig = {
-	isLive: false,
-	liveSync: false,
-	liveSyncMaxLatency: 1.2,
-	liveSyncTargetLatency: 0.8,
-	liveSyncPlaybackRate: 1.2,
-};
-
 export interface PlayerError {
 	category: "io" | "demux" | "media";
 	detail: string;

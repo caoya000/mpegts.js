@@ -1,4 +1,4 @@
-import type { MediaConfig } from "../config";
+import type { PlayerConfig } from "../config";
 import Browser from "../utils/browser";
 import { IllegalStateException, RuntimeException } from "../utils/exception";
 import Log from "../utils/logger";
@@ -61,7 +61,7 @@ class FetchLoader {
 	onHLSDetected: (() => void) | null;
 
 	// --- config / data source ---
-	private _config: MediaConfig;
+	private _config: PlayerConfig;
 	private _dataSource: DataSource | null;
 	private _extraData: unknown;
 
@@ -85,7 +85,7 @@ class FetchLoader {
 	private _contentLength: number | null;
 	private _receivedLength: number;
 
-	constructor(dataSource: DataSource, config: MediaConfig, extraData?: unknown) {
+	constructor(dataSource: DataSource, config: PlayerConfig, extraData?: unknown) {
 		this._config = config;
 		this._dataSource = dataSource;
 		this._extraData = extraData;

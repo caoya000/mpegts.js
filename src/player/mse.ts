@@ -1,3 +1,4 @@
+import type { PlayerConfig } from "../config";
 import Browser from "../utils/browser";
 import Log from "../utils/logger";
 
@@ -38,15 +39,10 @@ export interface MSE {
 
 const TAG = "MSE";
 
-// Auto-cleanup thresholds (seconds)
-const AUTO_CLEANUP_MAX_BACKWARD = 180;
-const AUTO_CLEANUP_MIN_BACKWARD = 120;
-
-export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }): MSE {
+export function createMSE(video: HTMLVideoElement, config: PlayerConfig): MSE {
 	// Use ManagedMediaSource only if w3c MediaSource is not available (e.g. iOS Safari)
 	const selfRecord = self as unknown as Record<string, unknown>;
 	const useManagedMediaSource = "ManagedMediaSource" in self && !("MediaSource" in self);
-	const autoCleanup = config.isLive;
 
 	let mediaSource: MSEMediaSource | null = null;
 	let objectURL: string | null = null;
@@ -146,9 +142,6 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 	}
 
 	function needCleanupSourceBuffer(): boolean {
-		if (!autoCleanup) {
-			return false;
-		}
 		const currentTime = video.currentTime;
 		const tracks: Track[] = ["video", "audio"];
 		for (const track of tracks) {
@@ -156,7 +149,7 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 			if (sb) {
 				const buffered = sb.buffered;
 				if (buffered.length >= 1) {
-					if (currentTime - buffered.start(0) >= AUTO_CLEANUP_MAX_BACKWARD) {
+					if (currentTime - buffered.start(0) >= config.bufferCleanupMaxBackward) {
 						return true;
 					}
 				}
@@ -180,9 +173,9 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 
 					if (start <= currentTime && currentTime < end + 3) {
 						// padding 3 seconds
-						if (currentTime - start >= AUTO_CLEANUP_MAX_BACKWARD) {
+						if (currentTime - start >= config.bufferCleanupMaxBackward) {
 							doRemove = true;
-							const removeEnd = currentTime - AUTO_CLEANUP_MIN_BACKWARD;
+							const removeEnd = currentTime - config.bufferCleanupMinBackward;
 							pendingRemoveRanges[track].push({ start, end: removeEnd });
 						}
 					} else if (end < currentTime) {
@@ -379,13 +372,12 @@ export function createMSE(video: HTMLVideoElement, config: { isLive: boolean }):
 					doAppendSegments();
 				}
 			}
-
 		},
 
 		appendMedia(track: Track, data: ArrayBuffer): void {
 			pendingSegments[track].push(data);
 
-			if (autoCleanup && needCleanupSourceBuffer()) {
+			if (needCleanupSourceBuffer()) {
 				doCleanupSourceBuffer();
 			}
 

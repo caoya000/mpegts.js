@@ -1,4 +1,4 @@
-import type { PlayerConfig } from "../types";
+import type { PlayerConfig } from "../config";
 import Log from "../utils/logger";
 
 const TAG = "LiveSync";
@@ -6,7 +6,7 @@ const TAG = "LiveSync";
 /** Sets up live latency synchronization by adjusting playbackRate on timeupdate events. */
 export function setupLiveSync(video: HTMLMediaElement, config: PlayerConfig): () => void {
 	function onTimeUpdate(): void {
-		if (!config.isLive || !config.liveSync) return;
+		if (!config.liveSync) return;
 
 		const buffered = video.buffered;
 		if (buffered.length === 0) return;

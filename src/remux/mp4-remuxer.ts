@@ -6,7 +6,6 @@ import AAC from "./aac-silent";
 import MP4 from "./mp4-generator";
 
 interface RemuxerConfig {
-	isLive?: boolean;
 	fixAudioTimestampGap?: boolean;
 }
 
@@ -98,7 +97,6 @@ class MP4Remuxer {
 	TAG: string;
 
 	private _config: RemuxerConfig;
-	private _isLive: boolean;
 
 	private _dtsBase: number;
 	private _dtsBaseInited: boolean;
@@ -127,7 +125,6 @@ class MP4Remuxer {
 		this.TAG = "MP4Remuxer";
 
 		this._config = config;
-		this._isLive = config.isLive === true;
 
 		this._dtsBase = -1;
 		this._dtsBaseInited = false;
@@ -644,9 +641,6 @@ class MP4Remuxer {
 			false,
 		);
 		info.lastSample = new SampleInfo(latest.dts, latest.pts, latest.duration, latest.originalDts, false);
-		if (!this._isLive) {
-			this._audioSegmentInfoList?.append(info);
-		}
 
 		track.samples = mp4Samples;
 		track.sequenceNumber++;
@@ -859,10 +853,6 @@ class MP4Remuxer {
 			latest.originalDts,
 			latest.isKeyframe ?? false,
 		);
-		if (!this._isLive) {
-			this._videoSegmentInfoList?.append(info);
-		}
-
 		track.samples = mp4Samples;
 		track.sequenceNumber++;
 
