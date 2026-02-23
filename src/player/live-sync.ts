@@ -15,10 +15,15 @@ export function setupLiveSync(video: HTMLMediaElement, config: PlayerConfig): ()
 		const latency = bufferedEnd - video.currentTime;
 
 		if (latency > config.liveSyncMaxLatency) {
-			video.playbackRate = Math.min(2, Math.max(1, config.liveSyncPlaybackRate));
+			const targetRate = Math.min(2, Math.max(1, config.liveSyncPlaybackRate));
+			if (targetRate !== video.playbackRate) {
+				Log.v(TAG, `Video playback rate set to ${targetRate}`);
+				video.playbackRate = Math.min(2, Math.max(1, config.liveSyncPlaybackRate));
+			}
 		} else if (latency <= config.liveSyncTargetLatency) {
 			if (video.playbackRate !== 1 && video.playbackRate !== 0) {
 				video.playbackRate = 1;
+				Log.v(TAG, "Video playback rate reset to 1");
 			}
 		}
 		// else: between target and max, keep current playbackRate
@@ -27,7 +32,9 @@ export function setupLiveSync(video: HTMLMediaElement, config: PlayerConfig): ()
 	video.addEventListener("timeupdate", onTimeUpdate);
 
 	return () => {
+		Log.v(TAG, "Video playback rate reset to 1, live sync disabled");
 		video.removeEventListener("timeupdate", onTimeUpdate);
+		video.playbackRate = 1;
 	};
 }
 

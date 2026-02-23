@@ -29,6 +29,7 @@ export function createMpegtsPlayer(
 	let destroyLiveSync: (() => void) | null = null;
 	let destroyStallJumper: (() => void) | null = null;
 	let mseGeneration = 0;
+	let liveSyncEnabled = config.liveSync;
 
 	// PCM audio player for software-decoded audio (MP2)
 	let pcmPlayer: PCMAudioPlayer | null = null;
@@ -139,7 +140,7 @@ export function createMpegtsPlayer(
 	}
 
 	function initLiveHelpers(): void {
-		if (!destroyLiveSync && config.liveSync) {
+		if (!destroyLiveSync && liveSyncEnabled) {
 			destroyLiveSync = setupLiveSync(video, config);
 		}
 		destroyStallJumper?.();
@@ -163,8 +164,10 @@ export function createMpegtsPlayer(
 
 		setLiveSync(enabled: boolean) {
 			if (enabled && !destroyLiveSync) {
+				liveSyncEnabled = true;
 				destroyLiveSync = setupLiveSync(video, config);
 			} else if (!enabled && destroyLiveSync) {
+				liveSyncEnabled = false;
 				destroyLiveSync();
 				destroyLiveSync = null;
 			}
