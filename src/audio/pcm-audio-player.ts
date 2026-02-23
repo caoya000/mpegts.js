@@ -1,7 +1,11 @@
 /*
  * PCM Audio Player
  *
- * Plays decoded PCM audio using Web Audio API with video synchronization support
+ * Plays decoded PCM audio using Web Audio API with video synchronization support.
+ *
+ * All PTS values stored internally are normalized to the video timeline
+ * (same space as video.currentTime), enabling correct seek across segments
+ * with discontinuous raw PTS values.
  */
 
 import type { PlayerConfig } from "../config";
@@ -13,23 +17,15 @@ interface AudioChunk {
 	samples: Float32Array;
 	channels: number;
 	sampleRate: number;
-	pts: number; // presentation timestamp in seconds
-}
-
-interface BufferedAudioChunk {
-	samples: Float32Array;
-	channels: number;
-	sampleRate: number;
-	pts: number;
+	time: number; // normalized to video timeline (seconds)
 	duration: number;
-	endPts: number;
+	endTime: number;
 }
 
 interface ScheduledSource {
 	source: AudioBufferSourceNode;
 	startTime: number;
 	endTime: number;
-	chunkPts: number;
 }
 
 export class PCMAudioPlayer {
@@ -43,16 +39,18 @@ export class PCMAudioPlayer {
 
 	// Sync state
 	private videoElement: HTMLVideoElement | null = null;
+	// basePtsOffset: rawAudioPTS - videoTime, used to normalize raw PTS to video timeline
 	private basePtsOffset: number = 0;
 	private basePtsEstablished: boolean = false;
 	private lastScheduledEndTime: number = 0;
+	private lastFeedPts: number = -1; // last raw PTS from feed(), for discontinuity detection
 
 	// iOS Silent Mode bypass
 	private audioElement: HTMLAudioElement | null = null;
 	private mediaStreamDestination: MediaStreamAudioDestinationNode | null = null;
 
-	// Buffer management for seek support
-	private audioBuffer: BufferedAudioChunk[] = [];
+	// Buffer management for seek support (all PTS values are in video timeline)
+	private audioBuffer: AudioChunk[] = [];
 
 	// Track scheduled sources for cancellation
 	private scheduledSources: ScheduledSource[] = [];
@@ -60,9 +58,6 @@ export class PCMAudioPlayer {
 	// Seek state
 	private isSeeking: boolean = false;
 
-	constructor(config: PlayerConfig) {
-		this.config = config;
-	}
 
 	// Bound event handlers for cleanup
 	private boundOnVideoSeeking: (() => void) | null = null;
@@ -70,6 +65,11 @@ export class PCMAudioPlayer {
 	private boundOnVideoPlay: (() => void) | null = null;
 	private boundOnVideoPause: (() => void) | null = null;
 	private boundOnVolumeChange: (() => void) | null = null;
+	private boundOnTimeUpdate: (() => void) | null = null;
+
+	constructor(config: PlayerConfig) {
+		this.config = config;
+	}
 
 	async init(): Promise<void> {
 		if (this.context) {
@@ -140,12 +140,18 @@ export class PCMAudioPlayer {
 			this.setVolume(video.volume);
 			this.setMuted(video.muted);
 		};
+		this.boundOnTimeUpdate = () => {
+			if (this.pendingChunks.length > 0) {
+				this.scheduleChunks();
+			}
+		};
 
 		video.addEventListener("seeking", this.boundOnVideoSeeking);
 		video.addEventListener("seeked", this.boundOnVideoSeeked);
 		video.addEventListener("play", this.boundOnVideoPlay);
 		video.addEventListener("pause", this.boundOnVideoPause);
 		video.addEventListener("volumechange", this.boundOnVolumeChange);
+		video.addEventListener("timeupdate", this.boundOnTimeUpdate);
 	}
 
 	detachVideo(): void {
@@ -155,37 +161,68 @@ export class PCMAudioPlayer {
 			if (this.boundOnVideoPlay) this.videoElement.removeEventListener("play", this.boundOnVideoPlay);
 			if (this.boundOnVideoPause) this.videoElement.removeEventListener("pause", this.boundOnVideoPause);
 			if (this.boundOnVolumeChange) this.videoElement.removeEventListener("volumechange", this.boundOnVolumeChange);
+			if (this.boundOnTimeUpdate) this.videoElement.removeEventListener("timeupdate", this.boundOnTimeUpdate);
 		}
 		this.boundOnVideoSeeking = null;
 		this.boundOnVideoSeeked = null;
 		this.boundOnVideoPlay = null;
 		this.boundOnVideoPause = null;
 		this.boundOnVolumeChange = null;
+		this.boundOnTimeUpdate = null;
 		this.videoElement = null;
 	}
 
-	feed(samples: Float32Array, channels: number, sampleRate: number, pts: number): void {
+	feed(samples: Float32Array, channels: number, sampleRate: number, rawPts: number): void {
 		if (!this.context || !this.gainNode) {
 			Log.w(TAG, "AudioContext not initialized, dropping audio");
 			return;
 		}
 
+		// Detect PTS discontinuity (segment switch with non-continuous timestamps)
+		if (this.lastFeedPts >= 0 && this.basePtsEstablished) {
+			const ptsJump = Math.abs(rawPts - this.lastFeedPts);
+			if (ptsJump > 1.0) {
+				// Absorb the PTS jump into basePtsOffset so the normalized timeline stays continuous.
+				// This maps the new frame to lastFeedPts-oldOffset (≈ previous frame's normalized time),
+				// keeping audio seamless across segments. The one-frame-duration overlap is handled
+				// by drift-based sync in scheduleChunks().
+				this.basePtsOffset += rawPts - this.lastFeedPts;
+				Log.v(
+					TAG,
+					`PTS discontinuity: jump=${ptsJump.toFixed(3)}s, basePtsOffset adjusted to ${this.basePtsOffset.toFixed(3)}s`,
+				);
+			}
+		}
+		this.lastFeedPts = rawPts;
+
+		// Establish basePtsOffset if not yet done (maps raw audio PTS → video timeline)
+		if (!this.basePtsEstablished && this.videoElement && this.videoElement.readyState >= 2) {
+			const videoTime = this.videoElement.currentTime;
+			this.basePtsOffset = rawPts - videoTime;
+			this.basePtsEstablished = true;
+			Log.v(
+				TAG,
+				`Base PTS offset established: ${this.basePtsOffset.toFixed(3)}s ` +
+					`(rawPTS=${rawPts.toFixed(3)}, videoTime=${videoTime.toFixed(3)})`,
+			);
+		}
+
+		// Can't normalize PTS without basePtsOffset — drop frames until established
+		if (!this.basePtsEstablished) {
+			return;
+		}
+
+		// Normalize PTS to video timeline before storing
+		const time = rawPts - this.basePtsOffset;
 		const samplesPerChannel = Math.floor(samples.length / channels);
 		const duration = samplesPerChannel / sampleRate;
+		const chunk: AudioChunk = { samples, channels, sampleRate, time, duration, endTime: time + duration };
 
-		const bufferedChunk: BufferedAudioChunk = {
-			samples,
-			channels,
-			sampleRate,
-			pts,
-			duration,
-			endPts: pts + duration,
-		};
-		this.insertToBuffer(bufferedChunk);
+		this.insertToBuffer(chunk);
 		this.cleanupBuffer();
 
 		if (!this.isPaused && !this.isSeeking) {
-			this.pendingChunks.push({ samples, channels, sampleRate, pts });
+			this.pendingChunks.push(chunk);
 			this.scheduleChunks();
 		}
 	}
@@ -193,6 +230,7 @@ export class PCMAudioPlayer {
 	/**
 	 * All audio scheduling goes through this single method — drift-based sync
 	 * is always active, whether chunks come from live feed() or buffer refill.
+	 * All PTS values here are in video timeline space.
 	 */
 	private scheduleChunks(): void {
 		if (!this.context || !this.gainNode || this.pendingChunks.length === 0) {
@@ -207,28 +245,12 @@ export class PCMAudioPlayer {
 		const ctxTime = this.context.currentTime;
 		const videoTime = this.videoElement?.currentTime ?? 0;
 
-		if (!this.basePtsEstablished && this.videoElement && this.videoElement.readyState >= 2) {
-			const firstChunk = this.pendingChunks[0];
-			this.basePtsOffset = firstChunk.pts - videoTime;
-			this.basePtsEstablished = true;
-
-			Log.v(
-				TAG,
-				`Base PTS offset established: ${this.basePtsOffset.toFixed(3)}s (audioPTS=${firstChunk.pts.toFixed(3)}, videoTime=${videoTime.toFixed(3)})`,
-			);
-		}
-
-		if (!this.basePtsEstablished) {
-			return;
-		}
-
 		while (this.pendingChunks.length > 0) {
 			const chunk = this.pendingChunks[0];
-
-			const audioVideoTime = chunk.pts - this.basePtsOffset;
-			const drift = audioVideoTime - videoTime;
+			const drift = chunk.time - videoTime;
 			let scheduleTime = ctxTime + drift;
 
+			// Ensure continuity: snap small gaps to lastScheduledEndTime
 			if (this.lastScheduledEndTime > 0) {
 				const gap = scheduleTime - this.lastScheduledEndTime;
 				if (gap < 0 && gap > -0.05) {
@@ -238,11 +260,13 @@ export class PCMAudioPlayer {
 				}
 			}
 
+			// Drop late chunks (> 10ms behind AudioContext clock)
 			if (scheduleTime < ctxTime - 0.01) {
 				this.pendingChunks.shift();
 				continue;
 			}
 
+			// Defer chunks too far ahead (> 5s)
 			if (scheduleTime > ctxTime + 5.0) {
 				break;
 			}
@@ -277,7 +301,7 @@ export class PCMAudioPlayer {
 		source.start(startTime);
 
 		const endTime = startTime + buffer.duration;
-		this.scheduledSources.push({ source, startTime, endTime, chunkPts: chunk.pts });
+		this.scheduledSources.push({ source, startTime, endTime });
 		this.cleanupCompletedSources();
 
 		return buffer.duration;
@@ -285,19 +309,19 @@ export class PCMAudioPlayer {
 
 	// ==================== Buffer Management ====================
 
-	private insertToBuffer(chunk: BufferedAudioChunk): void {
+	private insertToBuffer(chunk: AudioChunk): void {
 		let low = 0;
 		let high = this.audioBuffer.length;
 		while (low < high) {
 			const mid = (low + high) >>> 1;
-			if (this.audioBuffer[mid].pts < chunk.pts) {
+			if (this.audioBuffer[mid].time < chunk.time) {
 				low = mid + 1;
 			} else {
 				high = mid;
 			}
 		}
 
-		if (low < this.audioBuffer.length && Math.abs(this.audioBuffer[low].pts - chunk.pts) < 0.001) {
+		if (low < this.audioBuffer.length && Math.abs(this.audioBuffer[low].time - chunk.time) < 0.001) {
 			this.audioBuffer[low] = chunk;
 		} else {
 			this.audioBuffer.splice(low, 0, chunk);
@@ -307,17 +331,16 @@ export class PCMAudioPlayer {
 	/** Remove buffered audio that is too far behind the current playback position.
 	 *  Same strategy as MSE SourceBuffer cleanup: relative to currentTime. */
 	private cleanupBuffer(): void {
-		if (this.audioBuffer.length === 0 || !this.videoElement || !this.basePtsEstablished) return;
+		if (this.audioBuffer.length === 0 || !this.videoElement) return;
 
-		// Convert video currentTime to audio PTS space
-		const currentAudioPts = this.videoElement.currentTime + this.basePtsOffset;
+		const videoTime = this.videoElement.currentTime;
 
-		if (currentAudioPts - this.audioBuffer[0].pts < this.config.bufferCleanupMaxBackward) return;
+		if (videoTime - this.audioBuffer[0].time < this.config.bufferCleanupMaxBackward) return;
 
-		const cutoffPts = currentAudioPts - this.config.bufferCleanupMinBackward;
+		const cutoff = videoTime - this.config.bufferCleanupMinBackward;
 		let removeCount = 0;
 		for (let i = 0; i < this.audioBuffer.length; i++) {
-			if (this.audioBuffer[i].endPts < cutoffPts) {
+			if (this.audioBuffer[i].endTime < cutoff) {
 				removeCount++;
 			} else {
 				break;
@@ -336,9 +359,9 @@ export class PCMAudioPlayer {
 		while (low <= high) {
 			const mid = (low + high) >>> 1;
 			const chunk = this.audioBuffer[mid];
-			if (targetTime >= chunk.pts && targetTime < chunk.endPts) {
+			if (targetTime >= chunk.time && targetTime < chunk.endTime) {
 				return mid;
-			} else if (targetTime < chunk.pts) {
+			} else if (targetTime < chunk.time) {
 				high = mid - 1;
 			} else {
 				low = mid + 1;
@@ -354,7 +377,7 @@ export class PCMAudioPlayer {
 		const index = this.findChunkIndexByTime(time);
 		if (index < 0) return false;
 		const chunk = this.audioBuffer[index];
-		return time >= chunk.pts && time < chunk.endPts;
+		return time >= chunk.time && time < chunk.endTime;
 	}
 
 	/**
@@ -364,13 +387,7 @@ export class PCMAudioPlayer {
 	 */
 	private refillFromBuffer(startIndex: number): void {
 		for (let i = startIndex; i < this.audioBuffer.length; i++) {
-			const bc = this.audioBuffer[i];
-			this.pendingChunks.push({
-				samples: bc.samples,
-				channels: bc.channels,
-				sampleRate: bc.sampleRate,
-				pts: bc.pts,
-			});
+			this.pendingChunks.push(this.audioBuffer[i]);
 		}
 	}
 
@@ -406,7 +423,6 @@ export class PCMAudioPlayer {
 	private onVideoSeeking(): void {
 		Log.v(TAG, "Video seeking, canceling scheduled audio");
 		this.isSeeking = true;
-
 		this.cancelScheduledAudio();
 		this.pendingChunks = [];
 	}
@@ -419,30 +435,27 @@ export class PCMAudioPlayer {
 		this.seekToTime(targetTime);
 	}
 
+	/** Seek audio to a video timeline position. Buffer PTS is in video timeline, so
+	 *  targetTime can be used directly for buffer lookup — works across segments. */
 	seekToTime(targetTime: number): void {
 		this.cancelScheduledAudio();
 		this.pendingChunks = [];
-		this.basePtsEstablished = false;
 		this.lastScheduledEndTime = 0;
 
-		const audioPtsTarget = targetTime + this.basePtsOffset;
-
-		if (this.basePtsOffset !== 0 && this.isTimeBuffered(audioPtsTarget)) {
-			const startIndex = this.findChunkIndexByTime(audioPtsTarget);
+		if (this.isTimeBuffered(targetTime)) {
+			const startIndex = this.findChunkIndexByTime(targetTime);
 			if (startIndex >= 0) {
-				Log.v(
-					TAG,
-					`Seek to buffered position: videoTime=${targetTime.toFixed(3)}, audioPts=${audioPtsTarget.toFixed(3)}, chunk ${startIndex}`,
-				);
-				// Refill pendingChunks from buffer and schedule with drift sync
+				Log.v(TAG, `Seek hit buffer at chunk ${startIndex}, refilling ${this.audioBuffer.length - startIndex} chunks`);
 				this.refillFromBuffer(startIndex);
 				this.scheduleChunks();
 				return;
 			}
 		}
 
-		Log.v(TAG, `Seek target ${targetTime.toFixed(3)} not in buffer, waiting for new data`);
-		this.basePtsOffset = 0;
+		Log.v(TAG, "Seek target not in buffer, waiting for new data");
+		// Don't reset basePtsOffset here — it will be re-established on next feed()
+		// when PTS discontinuity is detected or when basePtsEstablished is false
+		this.basePtsEstablished = false;
 	}
 
 	// ==================== Playback Control ====================
@@ -470,7 +483,7 @@ export class PCMAudioPlayer {
 		this.lastScheduledEndTime = 0;
 		this.basePtsEstablished = false;
 
-		if (this.videoElement && this.basePtsOffset !== 0) {
+		if (this.videoElement) {
 			this.seekToTime(this.videoElement.currentTime);
 		}
 	}
@@ -501,6 +514,7 @@ export class PCMAudioPlayer {
 		this.lastScheduledEndTime = 0;
 		this.basePtsEstablished = false;
 		this.basePtsOffset = 0;
+		this.lastFeedPts = -1;
 	}
 
 	flush(): void {
@@ -512,6 +526,7 @@ export class PCMAudioPlayer {
 		this.lastScheduledEndTime = 0;
 		this.basePtsEstablished = false;
 		this.basePtsOffset = 0;
+		this.lastFeedPts = -1;
 	}
 
 	setVolume(volume: number): void {
