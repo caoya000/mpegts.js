@@ -28,12 +28,13 @@ interface ScheduledSource {
 	endTime: number;
 }
 
+let suspendedNotified = false;
+
 export class PCMAudioPlayer {
 	private config: PlayerConfig;
 	private context: AudioContext | null = null;
 	private gainNode: GainNode | null = null;
 	private pendingChunks: AudioChunk[] = [];
-	private isPaused: boolean = false;
 	private volume: number = 1.0;
 	private muted: boolean = false;
 
@@ -68,7 +69,6 @@ export class PCMAudioPlayer {
 
 	/** Called when AudioContext is blocked by autoplay policy (needs user interaction). */
 	onSuspended: (() => void) | null = null;
-	private suspendedNotified: boolean = false;
 
 	constructor(config: PlayerConfig) {
 		this.config = config;
@@ -109,19 +109,9 @@ export class PCMAudioPlayer {
 		this.context.onstatechange = () => {
 			Log.v(TAG, `AudioContext state changed to: ${this.context?.state}`);
 			if (this.context?.state === "running") {
-				// Discard all stale chunks accumulated while suspended,
-				// reset sync state — new chunks from feed() will re-establish basePtsOffset
-				this.pendingChunks = [];
-				this.basePtsEstablished = false;
-				this.lastScheduledEndTime = 0;
+				this.seekToTime(this.videoElement?.currentTime ?? 0);
 			}
 		};
-
-		if (this.context.state === "suspended") {
-			// Don't await — in some browsers resume() stays pending until
-			// user interaction, which would block init() indefinitely.
-			this.context.resume().catch(() => {});
-		}
 
 		Log.v(TAG, `AudioContext initialized, sampleRate: ${this.context.sampleRate}, state: ${this.context.state}`);
 	}
@@ -222,7 +212,7 @@ export class PCMAudioPlayer {
 		this.insertToBuffer(chunk);
 		this.cleanupBuffer();
 
-		if (!this.isPaused && !this.isSeeking) {
+		if (!this.isSeeking) {
 			this.pendingChunks.push(chunk);
 			this.scheduleChunks();
 		}
@@ -234,16 +224,17 @@ export class PCMAudioPlayer {
 	 * All PTS values here are in video timeline space.
 	 */
 	private scheduleChunks(): void {
-		if (!this.context || !this.gainNode || this.pendingChunks.length === 0) {
+		if (!this.context || !this.gainNode || this.pendingChunks.length === 0 || this.videoElement?.paused) {
 			return;
 		}
 
 		if (this.context.state === "suspended") {
-			this.context.resume().catch(() => {});
-			if (!this.suspendedNotified) {
-				this.suspendedNotified = true;
+			this.context.resume();
+			if (!suspendedNotified) {
+				suspendedNotified = true;
 				Log.w(TAG, "AudioContext blocked by autoplay policy, waiting for user interaction");
 				this.onSuspended?.();
+				this.videoElement?.pause();
 			}
 			return;
 		}
@@ -259,21 +250,21 @@ export class PCMAudioPlayer {
 			// Ensure continuity: snap small gaps to lastScheduledEndTime
 			if (this.lastScheduledEndTime > 0) {
 				const gap = scheduleTime - this.lastScheduledEndTime;
-				if (gap < 0 && gap > -0.05) {
+				if (gap < 0.005 && gap > -0.05) {
 					scheduleTime = this.lastScheduledEndTime;
 				} else if (gap < -0.05) {
 					this.lastScheduledEndTime = 0;
 				}
 			}
 
-			// Drop late chunks (> 10ms behind AudioContext clock)
-			if (scheduleTime < ctxTime - 0.01) {
+			// Drop late chunks (> 100ms behind AudioContext clock)
+			if (scheduleTime < ctxTime - 0.1) {
 				this.pendingChunks.shift();
 				continue;
 			}
 
-			// Defer chunks too far ahead (> 5s)
-			if (scheduleTime > ctxTime + 5.0) {
+			// Defer chunks too far ahead (> 1s)
+			if (scheduleTime > ctxTime + 1.0) {
 				break;
 			}
 
@@ -378,14 +369,6 @@ export class PCMAudioPlayer {
 		return low < this.audioBuffer.length ? low : -1;
 	}
 
-	private isTimeBuffered(time: number): boolean {
-		if (this.audioBuffer.length === 0) return false;
-		const index = this.findChunkIndexByTime(time);
-		if (index < 0) return false;
-		const chunk = this.audioBuffer[index];
-		return time >= chunk.time && time < chunk.endTime;
-	}
-
 	/**
 	 * Push all audioBuffer chunks from startIndex into pendingChunks.
 	 * Only references are copied (no PCM data duplication).
@@ -446,29 +429,21 @@ export class PCMAudioPlayer {
 	seekToTime(targetTime: number): void {
 		this.cancelScheduledAudio();
 		this.pendingChunks = [];
-		this.lastScheduledEndTime = 0;
 
-		if (this.isTimeBuffered(targetTime)) {
-			const startIndex = this.findChunkIndexByTime(targetTime);
-			if (startIndex >= 0) {
-				Log.v(TAG, `Seek hit buffer at chunk ${startIndex}, refilling ${this.audioBuffer.length - startIndex} chunks`);
-				this.refillFromBuffer(startIndex);
-				this.scheduleChunks();
-				return;
-			}
+		const startIndex = this.findChunkIndexByTime(targetTime);
+		if (startIndex >= 0) {
+			Log.v(TAG, `Seek hit buffer at chunk ${startIndex}, refilling ${this.audioBuffer.length - startIndex} chunks`);
+			this.refillFromBuffer(startIndex);
+			this.scheduleChunks();
+			return;
 		}
 
 		Log.v(TAG, "Seek target not in buffer, waiting for new data");
-		// Don't reset basePtsOffset here — it will be re-established on next feed()
-		// when PTS discontinuity is detected or when basePtsEstablished is false
-		this.basePtsEstablished = false;
 	}
 
 	// ==================== Playback Control ====================
 
 	async play(): Promise<void> {
-		this.isPaused = false;
-
 		if (this.context?.state === "suspended") {
 			try {
 				await this.context.resume();
@@ -484,24 +459,14 @@ export class PCMAudioPlayer {
 				Log.w(TAG, "Failed to play audio element");
 			}
 		}
-
-		this.pendingChunks = [];
-		this.lastScheduledEndTime = 0;
-		this.basePtsEstablished = false;
-
-		if (this.videoElement) {
-			this.seekToTime(this.videoElement.currentTime);
-		}
 	}
 
 	pause(): void {
-		this.isPaused = true;
-
 		this.cancelScheduledAudio();
 		this.pendingChunks = [];
 
-		if (this.context && this.context.state === "running") {
-			this.context.suspend().catch(() => {});
+		if (this.context?.state === "running") {
+			this.context.suspend();
 		}
 
 		if (this.audioElement) {
@@ -515,21 +480,9 @@ export class PCMAudioPlayer {
 		this.pendingChunks = [];
 		this.audioBuffer = [];
 
-		this.isPaused = false;
 		this.isSeeking = false;
 		this.lastScheduledEndTime = 0;
-		this.basePtsEstablished = false;
-		this.basePtsOffset = 0;
-		this.lastFeedPts = -1;
-	}
 
-	flush(): void {
-		this.cancelScheduledAudio();
-
-		this.pendingChunks = [];
-		this.audioBuffer = [];
-
-		this.lastScheduledEndTime = 0;
 		this.basePtsEstablished = false;
 		this.basePtsOffset = 0;
 		this.lastFeedPts = -1;
