@@ -1,4 +1,6 @@
-import type { PlayerConfig, PlayerImpl, PlayerSegment } from "../types";
+import { PCMAudioPlayer } from "../audio/pcm-audio-player";
+import type { PlayerConfig } from "../config";
+import type { PlayerImpl, PlayerSegment } from "../types";
 import type { WorkerCommand, WorkerEvent } from "../worker/messages";
 import TransmuxWorker from "../worker/transmux-worker.ts?worker&inline";
 import { setupLiveSync, setupStartupStallJumper } from "./live-sync";
@@ -28,6 +30,27 @@ export function createMpegtsPlayer(
 	let destroyStallJumper: (() => void) | null = null;
 	let mseGeneration = 0;
 
+	// PCM audio player for software-decoded audio (MP2)
+	let pcmPlayer: PCMAudioPlayer | null = null;
+	let pcmPlayerInitPromise: Promise<void> | null = null;
+
+	function ensurePCMPlayer(): PCMAudioPlayer {
+		if (!pcmPlayer) {
+			pcmPlayer = new PCMAudioPlayer(config);
+			pcmPlayerInitPromise = pcmPlayer.init();
+			pcmPlayer.attachVideo(video);
+		}
+		return pcmPlayer;
+	}
+
+	function destroyPCMPlayer(): void {
+		if (pcmPlayer) {
+			pcmPlayer.destroy();
+			pcmPlayer = null;
+			pcmPlayerInitPromise = null;
+		}
+	}
+
 	function handleWorkerMessage(e: MessageEvent): void {
 		const msg = e.data as WorkerEvent | { type: "destroyed" };
 		if (msg.type === "destroyed") return;
@@ -55,6 +78,14 @@ export function createMpegtsPlayer(
 			case "hls-detected":
 				impl.onHLSDetected?.();
 				break;
+			case "pcm-audio-data": {
+				const player = ensurePCMPlayer();
+				const pcm = new Float32Array(msg.pcm);
+				pcmPlayerInitPromise?.then(() => {
+					player.feed(pcm, msg.channels, msg.sampleRate, msg.pts / 1000);
+				});
+				break;
+			}
 		}
 	}
 
@@ -83,7 +114,7 @@ export function createMpegtsPlayer(
 
 	/** Create (or recreate) MSE and attach to video element. */
 	function initMSE(): void {
-		mse = createMSE(video, { isLive: config.isLive });
+		mse = createMSE(video, config);
 
 		mse.open(() => {
 			if (pendingSegments) {
@@ -123,6 +154,10 @@ export function createMpegtsPlayer(
 				mse.destroy();
 				mse = null;
 			}
+			// Reset PCM player on new load (flush, not stop — preserve pause state)
+			if (pcmPlayer) {
+				pcmPlayer.flush();
+			}
 			initMSE();
 			initLiveHelpers();
 			pendingSegments = segments;
@@ -152,6 +187,7 @@ export function createMpegtsPlayer(
 				mse.destroy();
 				mse = null;
 			}
+			destroyPCMPlayer();
 			destroyLiveSync?.();
 			destroyLiveSync = null;
 			destroyStallJumper?.();
