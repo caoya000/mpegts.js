@@ -170,6 +170,10 @@ class TSDemuxer extends BaseDemuxer {
 	private video_metadata_changed_ = false;
 	private loas_previous_frame: LOASAACFrame | null = null;
 
+	// Software audio decode support
+	public onRawAudioData: ((frame: { codec: "mp2"; data: Uint8Array; pts: number }) => void) | null = null;
+	private soft_decode_audio_codec_: "mp2" | null = null;
+
 	private video_track_ = {
 		type: "video",
 		id: 1,
@@ -207,6 +211,9 @@ class TSDemuxer extends BaseDemuxer {
 
 		this.video_track_ = null as unknown as typeof this.video_track_;
 		this.audio_track_ = null as unknown as typeof this.audio_track_;
+
+		this.onRawAudioData = null;
+		this.soft_decode_audio_codec_ = null;
 
 		super.destroy();
 	}
@@ -1937,6 +1944,37 @@ class TSDemuxer extends BaseDemuxer {
 				break;
 		}
 
+		// MP2 software decode: divert raw frame via callback, skip MSE audio path
+		if (object_type === 33 && this.onRawAudioData) {
+			if (!this.soft_decode_audio_codec_) {
+				this.soft_decode_audio_codec_ = "mp2";
+				Log.i(this.TAG, `MP2 audio detected, enabling software decode`);
+			}
+
+			const pts_ms = (pts ?? 0) / this.timescale_;
+			this.onRawAudioData({ codec: "mp2", data, pts: pts_ms });
+
+			// Still dispatch audio init segment for MediaInfo, but NOT track metadata
+			// (that would create an MSE audio buffer)
+			if (this.audio_init_segment_dispatched_ === false) {
+				this.audio_metadata_ = {
+					codec: "mp3",
+					object_type,
+					sample_rate,
+					channel_count,
+				};
+				// Dispatch init segment (will skip onTrackMetadata due to soft_decode_audio_codec_)
+				const sample = new MP3Data();
+				sample.object_type = object_type;
+				sample.sample_rate = sample_rate;
+				sample.channel_count = channel_count;
+				sample.data = data;
+				this.dispatchAudioInitSegment({ codec: "mp3", data: sample });
+			}
+			// Do NOT push sample to audio_track_ — audio goes through Web Audio API
+			return;
+		}
+
 		const sample = new MP3Data();
 		sample.object_type = object_type;
 		sample.sample_rate = sample_rate;
@@ -2154,7 +2192,10 @@ class TSDemuxer extends BaseDemuxer {
 			Log.v(this.TAG, `Generated first AudioSpecificConfig for mimeType: ${meta.codec}`);
 		}
 
-		this.onTrackMetadata?.("audio", meta);
+		// When software decoding, skip onTrackMetadata to prevent MSE audio buffer creation
+		if (!this.soft_decode_audio_codec_) {
+			this.onTrackMetadata?.("audio", meta);
+		}
 		this.audio_init_segment_dispatched_ = true;
 		this.video_metadata_changed_ = false;
 

@@ -1,11 +1,12 @@
-import type { MediaConfig } from "../config";
+import type { PlayerConfig } from "../config";
 import { createDefaultConfig } from "../config";
 import MediaInfo from "../core/media-info";
+import { WorkerAudioDecoder } from "../decoder/worker-audio-decoder";
 import DemuxErrors from "../demux/demux-errors";
 import TSDemuxer from "../demux/ts-demuxer";
 import FetchLoader from "../io/fetch-loader";
 import MP4Remuxer from "../remux/mp4-remuxer";
-import type { PlayerConfig, PlayerSegment } from "../types";
+import type { PlayerSegment } from "../types";
 import Log from "../utils/logger";
 
 export interface PipelineCallbacks {
@@ -32,6 +33,7 @@ export interface PipelineCallbacks {
 	onIOError: (type: string, info: { code: number; msg: string }) => void;
 	onDemuxError: (type: string, info: string) => void;
 	onHLSDetected: () => void;
+	onPCMAudioData: (pcm: Float32Array, channels: number, sampleRate: number, pts: number) => void;
 }
 
 interface InternalSegment {
@@ -46,7 +48,7 @@ interface InternalSegment {
 class Pipeline {
 	private readonly TAG = "Pipeline";
 
-	private _config: MediaConfig;
+	private _config: PlayerConfig;
 	private _callbacks: PipelineCallbacks;
 
 	private _segments: InternalSegment[];
@@ -56,18 +58,12 @@ class Pipeline {
 	private _demuxer: TSDemuxer | null;
 	private _remuxer: MP4Remuxer | null;
 	private _ioctl: FetchLoader | null;
+	private _workerAudioDecoder: WorkerAudioDecoder | null = null;
+	private _workerAudioDecoderInitPromise: Promise<boolean> | null = null;
 
 	constructor(segments: PlayerSegment[], config: PlayerConfig, callbacks: PipelineCallbacks) {
 		this._callbacks = callbacks;
-
-		// Build full MediaConfig by merging PlayerConfig into defaults
-		const mediaConfig = createDefaultConfig();
-		mediaConfig.isLive = config.isLive;
-		mediaConfig.liveSync = config.liveSync;
-		mediaConfig.liveSyncMaxLatency = config.liveSyncMaxLatency;
-		mediaConfig.liveSyncTargetLatency = config.liveSyncTargetLatency;
-		mediaConfig.liveSyncPlaybackRate = config.liveSyncPlaybackRate;
-		this._config = mediaConfig;
+		this._config = { ...createDefaultConfig(), ...config };
 
 		this._segments = this._buildSegments(segments);
 		this._currentSegmentIndex = 0;
@@ -139,6 +135,9 @@ class Pipeline {
 			this._remuxer = null;
 		}
 
+		// Reset WASM audio decoder state (clear stale mdct/qmf from previous stream)
+		this._workerAudioDecoder?.reset();
+
 		// Start from segment 0 — will re-probe format and recreate demuxer+remuxer
 		this._loadSegment(0);
 	}
@@ -158,6 +157,11 @@ class Pipeline {
 			this._remuxer.destroy();
 			this._remuxer = null;
 		}
+		if (this._workerAudioDecoder) {
+			this._workerAudioDecoder.destroy();
+			this._workerAudioDecoder = null;
+		}
+		this._workerAudioDecoderInitPromise = null;
 	}
 
 	// ---- Private methods ----
@@ -193,26 +197,39 @@ class Pipeline {
 	}
 
 	private _onInitChunkArrival(data: ArrayBuffer, byteStart: number): number {
-		let consumed = 0;
-
 		const probeData = TSDemuxer.probe(data);
-		if ((probeData as Record<string, unknown>).match) {
-			this._setupTSDemuxerRemuxer(probeData);
-			consumed = (this._demuxer as TSDemuxer).parseChunks(data, byteStart);
+
+		if (!(probeData as Record<string, unknown>).match) {
+			if (!(probeData as Record<string, unknown>).needMoreData) {
+				Log.e(this.TAG, "Non MPEG-TS, Unsupported media type!");
+				Promise.resolve().then(() => {
+					this._internalAbort();
+				});
+				this._callbacks.onDemuxError(DemuxErrors.FORMAT_UNSUPPORTED, "Non MPEG-TS, Unsupported media type!");
+			}
+			return 0;
 		}
 
-		if (!(probeData as Record<string, unknown>).match && !(probeData as Record<string, unknown>).needMoreData) {
-			Log.e(this.TAG, "Non MPEG-TS, Unsupported media type!");
-			Promise.resolve().then(() => {
-				this._internalAbort();
-			});
-			this._callbacks.onDemuxError(DemuxErrors.FORMAT_UNSUPPORTED, "Non MPEG-TS, Unsupported media type!");
+		this._setupTSDemuxerRemuxer(probeData);
+
+		// Set timestampBase for multi-segment time continuity
+		const segment = this._segments[this._currentSegmentIndex];
+		if (segment && this._demuxer) {
+			this._demuxer.timestampBase = segment.timestampBase * 90000; // seconds → 90kHz ticks
 		}
 
-		return consumed;
+		// Switch from probe handler to direct demuxer parsing for subsequent chunks
+		if (this._ioctl && this._demuxer) {
+			(this._ioctl as unknown as Record<string, unknown>).onDataArrival = this._demuxer.parseChunks.bind(this._demuxer);
+		}
+
+		return this._demuxer?.parseChunks(data, byteStart) ?? 0;
 	}
 
 	private _setupTSDemuxerRemuxer(probeData: unknown): void {
+		if (this._demuxer) {
+			this._demuxer.destroy();
+		}
 		const demuxer = new TSDemuxer(probeData as Record<string, unknown>, this._config);
 		this._demuxer = demuxer;
 
@@ -232,6 +249,13 @@ class Pipeline {
 		demuxer.onSCTE35Metadata = () => {};
 		demuxer.onPESPrivateDataDescriptor = () => {};
 		demuxer.onPESPrivateData = () => {};
+
+		// Set up software audio decode callback when MP2 WASM URL is configured
+		if (this._config.wasmDecoders.mp2) {
+			demuxer.onRawAudioData = (frame) => {
+				this._handleRawAudioFrame(frame);
+			};
+		}
 
 		(this._remuxer as MP4Remuxer).bindDataSource(
 			this._demuxer as unknown as {
@@ -323,6 +347,25 @@ class Pipeline {
 		this._callbacks.onMediaInfo(exportInfo);
 	}
 
+	private _handleRawAudioFrame(frame: { codec: "mp2"; data: Uint8Array; pts: number }): void {
+		// Lazily create WorkerAudioDecoder on first raw audio frame
+		if (!this._workerAudioDecoder) {
+			const mp2Url = this._config.wasmDecoders.mp2;
+			if (!mp2Url) return;
+			this._workerAudioDecoder = new WorkerAudioDecoder(mp2Url);
+			this._workerAudioDecoderInitPromise = this._workerAudioDecoder.initDecoder();
+		}
+
+		// Queue decode after init completes
+		this._workerAudioDecoderInitPromise?.then((ready) => {
+			if (!ready || !this._workerAudioDecoder) return;
+
+			const result = this._workerAudioDecoder.decode(frame.data, frame.pts);
+			if (result) {
+				this._callbacks.onPCMAudioData(result.pcm, result.channels, result.sampleRate, result.pts);
+			}
+		});
+	}
 }
 
 export default Pipeline;

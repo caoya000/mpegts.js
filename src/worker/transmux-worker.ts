@@ -1,4 +1,5 @@
-import type { PlayerConfig, PlayerSegment } from "../types";
+import type { PlayerConfig } from "../config";
+import type { PlayerSegment } from "../types";
 import type { WorkerCommand, WorkerEvent } from "./messages";
 import Pipeline, { type PipelineCallbacks } from "./pipeline";
 
@@ -47,6 +48,10 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 		},
 		onHLSDetected() {
 			post({ type: "hls-detected", gen });
+		},
+		onPCMAudioData(pcm, channels, sampleRate, pts) {
+			const buffer = pcm.buffer as ArrayBuffer;
+			post({ type: "pcm-audio-data", pcm: buffer, channels, sampleRate, pts, gen }, [buffer]);
 		},
 	};
 

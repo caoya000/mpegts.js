@@ -1,4 +1,5 @@
-import type { PlayerConfig, PlayerSegment } from "../types";
+import type { PlayerConfig } from "../config";
+import type { PlayerSegment } from "../types";
 
 export type WorkerCommand =
 	| { type: "init"; segments: PlayerSegment[]; config: PlayerConfig; gen: number }
@@ -14,4 +15,5 @@ export type WorkerEvent =
 	| { type: "media-info"; info: unknown; gen: number }
 	| { type: "complete"; gen: number }
 	| { type: "error"; category: "io" | "demux"; detail: string; info?: string; gen: number }
-	| { type: "hls-detected"; gen: number };
+	| { type: "hls-detected"; gen: number }
+	| { type: "pcm-audio-data"; pcm: ArrayBuffer; channels: number; sampleRate: number; pts: number; gen: number };
