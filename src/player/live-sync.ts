@@ -5,6 +5,16 @@ const TAG = "LiveSync";
 
 /** Sets up live latency synchronization by adjusting playbackRate on timeupdate events. */
 export function setupLiveSync(video: HTMLMediaElement, config: PlayerConfig): () => void {
+	if (config.liveSync) {
+		Log.v(
+			TAG,
+			"Live sync enabled, target latency:",
+			config.liveSyncTargetLatency,
+			"max latency:",
+			config.liveSyncMaxLatency,
+		);
+	}
+
 	function onTimeUpdate(): void {
 		if (!config.liveSync) return;
 
