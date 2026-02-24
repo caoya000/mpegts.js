@@ -880,8 +880,8 @@ class TSDemuxer extends BaseDemuxer {
 							} else if (registration === "AC-3" && !already_has_audio) {
 								pmt.common_pids.ac3 = elementary_PID; // DVB AC-3 (FIXME: NEED VERIFY)
 							} else if (registration === "BSSD" && !already_has_audio) {
-                pmt.common_pids.ac3 = elementary_PID; // 【新增】支持 BSSD
-              } else if (registration === "EC-3" && !already_has_audio) {
+								pmt.common_pids.ac3 = elementary_PID; // 【新增】支持 BSSD
+							} else if (registration === "EC-3" && !already_has_audio) {
 								pmt.common_pids.eac3 = elementary_PID; // DVB EAC-3 (FIXME: NEED VERIFY)
 							} else if (registration === "AV01") {
 								pmt.common_pids.av1 = elementary_PID;

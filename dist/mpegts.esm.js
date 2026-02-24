@@ -152,7 +152,7 @@ class he {
       ));
     }
     if (this.lastFeedPts = s, !this.basePtsEstablished && this.videoElement && this.videoElement.readyState >= 2) {
-      const b = this.videoElement.currentTime;
+      const b = this.videoElement.buffered.end(this.videoElement.buffered.length - 1);
       this.basePtsOffset = s - b, this.basePtsEstablished = !0, m.v(
         w,
         `Base PTS offset established: ${this.basePtsOffset.toFixed(3)}s (rawPTS=${s.toFixed(3)}, videoTime=${b.toFixed(3)})`
@@ -346,8 +346,15 @@ function ue(e) {
     );
   }
 }
-const $ = "LiveSync";
+const V = "LiveSync";
 function Z(e, t) {
+  t.liveSync && m.v(
+    V,
+    "Live sync enabled, target latency:",
+    t.liveSyncTargetLatency,
+    "max latency:",
+    t.liveSyncMaxLatency
+  );
   function a() {
     if (!t.liveSync) return;
     const i = e.buffered;
@@ -355,11 +362,11 @@ function Z(e, t) {
     const n = i.end(i.length - 1) - e.currentTime;
     if (n > t.liveSyncMaxLatency) {
       const h = Math.min(2, Math.max(1, t.liveSyncPlaybackRate));
-      h !== e.playbackRate && (m.v($, `Video playback rate set to ${h}`), e.playbackRate = Math.min(2, Math.max(1, t.liveSyncPlaybackRate)));
-    } else n <= t.liveSyncTargetLatency && e.playbackRate !== 1 && e.playbackRate !== 0 && (e.playbackRate = 1, m.v($, "Video playback rate reset to 1"));
+      h !== e.playbackRate && (m.v(V, `Video playback rate set to ${h}`), e.playbackRate = Math.min(2, Math.max(1, t.liveSyncPlaybackRate)));
+    } else n <= t.liveSyncTargetLatency && e.playbackRate !== 1 && e.playbackRate !== 0 && (e.playbackRate = 1, m.v(V, "Video playback rate reset to 1"));
   }
   return e.addEventListener("timeupdate", a), () => {
-    m.v($, "Video playback rate reset to 1, live sync disabled"), e.removeEventListener("timeupdate", a), e.playbackRate = 1;
+    m.v(V, "Video playback rate reset to 1, live sync disabled"), e.removeEventListener("timeupdate", a), e.playbackRate = 1;
   };
 }
 function me(e) {
@@ -372,7 +379,7 @@ function me(e) {
     if (h || !t || e.readyState < 2) {
       if (r.length > 0 && e.currentTime < r.start(0)) {
         const l = r.start(0);
-        m.w($, `Playback stuck at ${e.currentTime}, seeking to ${l}`), e.currentTime = l, e.removeEventListener("progress", n);
+        m.w(V, `Playback stuck at ${e.currentTime}, seeking to ${l}`), e.currentTime = l, e.removeEventListener("progress", n);
       }
     } else
       e.removeEventListener("progress", n);
@@ -453,7 +460,7 @@ function pe(e, t) {
       }
     }
   }
-  function V() {
+  function $() {
     const d = ["video", "audio"];
     for (const y of d) {
       const o = h[y];
@@ -506,7 +513,7 @@ function pe(e, t) {
     }
   }
   function ie() {
-    O() ? K() : D() ? V() : v && I.endOfStream();
+    O() ? K() : D() ? $() : v && I.endOfStream();
   }
   function ae(d) {
     m.e(E, "SourceBuffer Error:", d);
@@ -556,7 +563,7 @@ function pe(e, t) {
               container: _.container
             };
         }
-        D() && V(), c?.(), c = null;
+        D() && $(), c?.(), c = null;
       }, C = () => {
         m.v(E, "MediaSource onSourceEnded");
       }, M = () => {
@@ -581,13 +588,13 @@ function pe(e, t) {
       const P = !b[d];
       if (X(d, _, u), r[d].push(y), !P) {
         const k = h[d];
-        k && !k.updating && V();
+        k && !k.updating && $();
       }
     },
     appendMedia(d, y) {
       r[d].push(y), te() && se();
       const o = h[d];
-      o && !o.updating && !O() && V();
+      o && !o.updating && !O() && $();
     },
     endOfStream() {
       if (!s || s.readyState !== "open") {
