@@ -188,7 +188,7 @@ export class PCMAudioPlayer {
 
 		// Establish basePtsOffset if not yet done (maps raw audio PTS → video timeline)
 		if (!this.basePtsEstablished && this.videoElement && this.videoElement.readyState >= 2) {
-			const videoTime = this.videoElement.currentTime;
+			const videoTime = this.videoElement.buffered.end(this.videoElement.buffered.length - 1);
 			this.basePtsOffset = rawPts - videoTime;
 			this.basePtsEstablished = true;
 			Log.v(
