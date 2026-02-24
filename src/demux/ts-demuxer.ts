@@ -879,7 +879,9 @@ class TSDemuxer extends BaseDemuxer {
 								pmt.smpte2038_pids[elementary_PID] = true;
 							} else if (registration === "AC-3" && !already_has_audio) {
 								pmt.common_pids.ac3 = elementary_PID; // DVB AC-3 (FIXME: NEED VERIFY)
-							} else if (registration === "EC-3" && !already_has_audio) {
+							} else if (registration === "BSSD" && !already_has_audio) {
+                pmt.common_pids.ac3 = elementary_PID; // 【新增】支持 BSSD
+              } else if (registration === "EC-3" && !already_has_audio) {
 								pmt.common_pids.eac3 = elementary_PID; // DVB EAC-3 (FIXME: NEED VERIFY)
 							} else if (registration === "AV01") {
 								pmt.common_pids.av1 = elementary_PID;
@@ -928,7 +930,7 @@ class TSDemuxer extends BaseDemuxer {
 							if (elementary_PID === pmt.common_pids.av1) {
 								this.video_metadata_.av1c = data.subarray(offset + 2, offset + 2 + length);
 							}
-						} else if (tag === 0x82) {
+						} else if (tag === 0x82 || tag === 0x6a || tag === 0x81) {
 							pmt.common_pids.ac3 = elementary_PID;
 						} else if (tag === 0x7a) {
 							pmt.common_pids.eac3 = elementary_PID;
